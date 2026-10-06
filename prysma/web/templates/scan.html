@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prysma — Scan Results</title>
+    <style>
+        :root {{
+            --bg: #0d1117; --card: #161b22; --border: #30363d;
+            --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+            --green: #3fb950; --orange: #d29922; --red: #f85149; --purple: #bc8cff;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.6; max-width: 1200px; margin: 0 auto;
+        }}
+        header {{
+            background: var(--card); border-bottom: 1px solid var(--border);
+            padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center;
+        }}
+        header h1 {{ font-size: 1.5rem; }}
+        .section {{ padding: 1.5rem 2rem; }}
+        .section h2 {{ font-size: 1.2rem; margin-bottom: 1rem; }}
+        .scan-log {{
+            background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+            padding: 1.5rem; font-family: 'Cascadia Code', monospace; font-size: 0.85rem;
+            white-space: pre-wrap; color: var(--green); min-height: 200px;
+        }}
+        .actions {{ padding: 1rem 2rem; display: flex; gap: 1rem; }}
+        .btn {{
+            background: var(--accent); color: var(--bg); border: none;
+            padding: 0.7rem 1.5rem; border-radius: 6px; font-weight: 600;
+            cursor: pointer; text-decoration: none; font-size: 0.9rem;
+        }}
+        .btn:hover {{ opacity: 0.9; }}
+        .btn-secondary {{ background: var(--card); border: 1px solid var(--border); color: var(--text); }}
+        footer {{ padding: 2rem; text-align: center; color: var(--muted); font-size: 0.8rem; }}
+        .muted {{ color: var(--muted); }}
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📋 Prysma — Scan Results</h1>
+        <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+    </header>
+
+    <div class="actions">
+        <a href="/api/scan" class="btn" onclick="triggerScan(event)">▶ Run New Scan</a>
+        <a href="/api/analyze" class="btn btn-secondary" onclick="triggerAnalyze(event)">🧠 Strategic Analysis</a>
+    </div>
+
+    <div class="section">
+        <h2>Scan Output</h2>
+        <div class="scan-log" id="scan-log">Last scan completed at {last_updated}
+
+Click "Run New Scan" to trigger a fresh scan cycle. Results will appear on the dashboard after the scan completes.
+
+Scan cycle includes:
+  • Scout Agent — Tavily web search + web scraping
+  • Trend Radar — GitHub, Reddit, news trend detection
+  • Competitive Intel — App store ASO changes, reviews, new entrants
+  • Analyst Agent — Nemotron classification (Nano) + per-finding analysis (Super)</div>
+    </div>
+
+    <footer>Prysma · <a href="https://github.com/driftedslinky/prysma-competitive-intel" style="color:var(--accent)">GitHub</a> · Updated {last_updated}</footer>
+
+    <script>
+    function triggerScan(e) {{
+        e.preventDefault();
+        fetch('/api/scan', {{method: 'POST'}})
+            .then(r => r.json())
+            .then(d => {{
+                alert(d.message);
+                document.getElementById('scan-log').textContent = 'Scan started at ' + new Date().toLocaleTimeString() + '. Check the dashboard for results.';
+            }})
+            .catch(() => alert('Scan failed'));
+    }}
+    function triggerAnalyze(e) {{
+        e.preventDefault();
+        fetch('/api/analyze', {{method: 'POST'}})
+            .then(r => r.json())
+            .then(d => alert(d.message + ' Refresh the dashboard in 2-3 minutes.'))
+            .catch(() => alert('Analysis failed'));
+    }}
+    </script>
+</body>
+</html>
