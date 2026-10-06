@@ -1,0 +1,36 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.eggs/
+*.egg-info/
+
+# Database
+data/*.db
+data/snapshots/
+data/cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Blueprint workflow (local development scaffolding, not part of the project)
+blueprint/
+.agents/
+.claude/
+.pytest_cache/
+IDEA.md
