@@ -1,0 +1,30 @@
+# Prysma web dashboard — deployed behind the existing Traefik instance.
+#
+# On the VPS this lives at:  /docker/prysma/app/deploy/docker-compose.yml
+# Start with:                cd /docker/prysma/app/deploy && docker compose up -d --build
+#
+# Traefik (running with network_mode: host) discovers this container through
+# the Docker socket and routes the subdomain to it. Certificates come from the
+# existing letsencrypt resolver, so HTTPS works automatically once DNS points
+# the subdomain at the VPS.
+services:
+  prysma:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: prysma-web:latest
+    container_name: prysma-web
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    volumes:
+      # Persist the SQLite database and generated charts across restarts
+      - ../data:/app/data
+    expose:
+      - "8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prysma.rule=Host(`prysma.vanillapolygons.com`)
+      - traefik.http.routers.prysma.entrypoints=websecure
+      - traefik.http.routers.prysma.tls.certresolver=letsencrypt
+      - traefik.http.services.prysma.loadbalancer.server.port=8000

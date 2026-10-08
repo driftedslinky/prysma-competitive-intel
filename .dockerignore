@@ -1,0 +1,30 @@
+# Git / VCS
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.eggs/
+*.egg-info/
+
+# Data (mounted as a volume at runtime)
+data/*.db
+data/cache/
+data/snapshots/
+
+# Blueprint / editor / docs
+blueprint/
+.agents/
+.claude/
+.vscode/
+.idea/
+*.md
+.pytest_cache/
+
+# Secrets
+.env
+*.env
+!.env.example
