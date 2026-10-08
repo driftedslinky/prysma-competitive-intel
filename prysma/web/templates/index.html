@@ -183,39 +183,39 @@
     </footer>
 
     <script>
-    function triggerScan(e) {{
+    function triggerScan(e) {
         e.preventDefault();
-        fetch('/api/scan', {{method: 'POST'}})
+        fetch('/api/scan', {method: 'POST'})
             .then(r => r.json())
             .then(d => alert(d.message || 'Scan started'))
             .catch(() => alert('Scan failed to start'));
-    }}
-    function triggerAnalyze(e) {{
+    }
+    function triggerAnalyze(e) {
         e.preventDefault();
-        fetch('/api/analyze', {{method: 'POST'}})
+        fetch('/api/analyze', {method: 'POST'})
             .then(r => r.json())
             .then(d => alert(d.message + ' Refresh this page in 2-3 minutes.'))
             .catch(() => alert('Analysis failed to start'));
-    }}
-    function tavilySearch() {{
+    }
+    function tavilySearch() {
         const q = document.getElementById('tavily-query').value;
         if (!q) return;
         document.getElementById('search-results').innerHTML = '<p class="muted">Searching...</p>';
         fetch('/api/tavily?query=' + encodeURIComponent(q))
             .then(r => r.json())
-            .then(data => {{
-                if (!data.results || !data.results.length) {{
+            .then(data => {
+                if (!data.results || !data.results.length) {
                     document.getElementById('search-results').innerHTML = '<p class="muted">No results.</p>';
                     return;
-                }}
+                }
                 let html = '';
-                for (const r of data.results) {{
+                for (const r of data.results) {
                     html += '<div class="search-result"><a href="' + r.url + '" target="_blank">' + r.title + '</a><p>' + (r.content || '').substring(0, 200) + '</p></div>';
-                }}
+                }
                 document.getElementById('search-results').innerHTML = html;
-            }})
+            })
             .catch(() => document.getElementById('search-results').innerHTML = '<p class="muted">Search failed.</p>');
-    }}
+    }
     </script>
 </body>
 </html>
