@@ -2,6 +2,8 @@
 
 **Nebius x NVIDIA Global AI Hackathon 2026**
 
+> **🔗 Live demo:** https://prysma.vanillapolygons.com
+
 Prysma is a multi-agent competitive intelligence platform that monitors your competitive landscape, detects market changes, and delivers actionable strategic analysis — powered by NVIDIA Nemotron models on Nebius Token Factory.
 
 ## What it does
