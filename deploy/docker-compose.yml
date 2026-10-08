@@ -22,9 +22,6 @@ services:
       - ../data:/app/data
     expose:
       - "8000"
-    ports:
-      # Direct IP fallback: http://77.37.87.160:8000 (used until DNS/TLS lands)
-      - "8000:8000"
     labels:
       - traefik.enable=true
       - traefik.http.routers.prysma.rule=Host(`prysma.vanillapolygons.com`)
