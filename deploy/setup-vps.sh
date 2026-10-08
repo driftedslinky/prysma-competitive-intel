@@ -1,54 +1,53 @@
 #!/usr/bin/env bash
 # One-shot VPS setup for the Prysma web dashboard.
 # Run as root on the VPS:  bash setup-vps.sh
+#
+# Deploys behind the existing Traefik instance at /docker/traefik.
+# Requires DNS: prysma.vanillapolygons.com -> this VPS IP.
 set -euo pipefail
 
 REPO="https://github.com/driftedslinky/prysma-competitive-intel.git"
-APP_DIR="/opt/prysma"
-PORT=8000
+BASE="/docker/prysma"
+APP="$BASE/app"
 
-echo "==> 1/6 Installing system packages"
-apt-get update -qq
-apt-get install -y -qq git python3 python3-venv python3-pip curl ufw
-
-echo "==> 2/6 Cloning repository"
-if [ -d "$APP_DIR/.git" ]; then
-  cd "$APP_DIR" && git pull --ff-only
+echo "==> 1/6 Cloning / updating repository"
+mkdir -p "$BASE"
+if [ -d "$APP/.git" ]; then
+  cd "$APP" && git pull --ff-only
 else
-  git clone "$REPO" "$APP_DIR"
+  git clone "$REPO" "$APP"
 fi
-cd "$APP_DIR"
+cd "$APP"
 
-echo "==> 3/6 Creating virtualenv and installing dependencies"
-python3 -m venv .venv
-./.venv/bin/pip install --quiet --upgrade pip
-./.venv/bin/pip install --quiet -r requirements.txt
-
-echo "==> 4/6 Configuring environment"
-if [ ! -f "$APP_DIR/.env" ]; then
-  cp "$APP_DIR/.env.example" "$APP_DIR/.env"
+echo "==> 2/6 Configuring environment"
+if [ ! -f "$APP/.env" ]; then
+  cp "$APP/.env.example" "$APP/.env"
   echo ""
-  echo "  !!  ACTION REQUIRED: edit $APP_DIR/.env and add real keys:"
+  echo "  !!  ACTION REQUIRED: edit $APP/.env and add real keys:"
   echo "      NEBIUS_API_KEY, TAVILY_API_KEY, TELEGRAM_BOT_TOKEN"
-  echo "      Then re-run:  systemctl restart prysma-web"
   echo ""
 fi
 
-echo "==> 5/6 Installing systemd service"
-cp "$APP_DIR/deploy/prysma-web.service" /etc/systemd/system/prysma-web.service
-systemctl daemon-reload
-systemctl enable prysma-web
-systemctl restart prysma-web
+echo "==> 3/6 Building and starting the container"
+cd "$APP/deploy"
+docker compose up -d --build
 
-echo "==> 6/6 Opening firewall port $PORT"
-ufw allow "$PORT"/tcp || true
+echo "==> 4/6 Waiting for startup"
+sleep 8
+docker compose ps
 
-sleep 3
+echo "==> 5/6 Health check (local)"
+container_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' prysma-web 2>/dev/null || true)
+if [ -n "$container_ip" ]; then
+  curl -s "http://$container_ip:8000/api/status" || echo "(not responding - check: docker logs prysma-web)"
+fi
+
+echo "==> 6/6 Done"
 echo ""
-echo "==> Status"
-systemctl --no-pager status prysma-web | head -12 || true
+echo "Public URL (once DNS resolves):  https://prysma.vanillapolygons.com"
+echo "Traefik fetches the TLS certificate on the first request, so the very"
+echo "first hit may fail until the cert lands. Retry after a few seconds."
 echo ""
-echo "==> Health check"
-curl -s "http://127.0.0.1:$PORT/api/status" || echo "(not responding yet - check: journalctl -u prysma-web -n 50)"
-echo ""
-echo "Done. Public URL:  http://$(curl -s ifconfig.me):$PORT"
+echo "Useful commands:"
+echo "  docker logs -f prysma-web"
+echo "  cd $APP/deploy && docker compose restart"
