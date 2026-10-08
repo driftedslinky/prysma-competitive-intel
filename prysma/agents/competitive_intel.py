@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -140,11 +141,7 @@ class CompetitiveIntelAgent:
         if count_match:
             ratings_count = self._parse_count_string(count_match.group(1))
 
-        # Description
-        description = None
-        desc_match = re.search(r'"description":"(.{100,2000})"', text)
-        if desc_match:
-            description = desc_match.group(1).replace('\\n', '\n').replace('\\"', '"')
+        description = self._extract_play_description(text)
 
         # Last updated
         updated = None
@@ -173,6 +170,41 @@ class CompetitiveIntelAgent:
             "last_updated": updated,
             "price": price,
         }
+
+    _LD_JSON_RE = re.compile(
+        r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S
+    )
+    _JSON_LD_LEAK_MARKERS = ("ratingCount", "operatingSystem", "aggregateRating")
+
+    @classmethod
+    def _extract_play_description(cls, text: str) -> Optional[str]:
+        """Description from the page's JSON-LD block, else a non-greedy regex.
+
+        Returns None rather than a value that has swallowed surrounding JSON-LD,
+        because a corrupt description shows up as a false ASO change every scan.
+        """
+        description = None
+        for block in cls._LD_JSON_RE.findall(text):
+            try:
+                data = json.loads(block)
+            except ValueError:
+                continue
+            if isinstance(data, dict) and isinstance(data.get("description"), str):
+                description = data["description"]
+                break
+
+        if description is None:
+            match = re.search(r'"description":"(.*?)"', text)
+            if match:
+                description = match.group(1).replace('\\n', '\n').replace('\\"', '"')
+
+        if not description:
+            return None
+        if any(marker in description for marker in cls._JSON_LD_LEAK_MARKERS):
+            return None
+        if description.count("{") != description.count("}"):
+            return None
+        return description
 
     def _scrape_app_store(
         self, app_id: str, competitor: dict
@@ -276,6 +308,8 @@ class CompetitiveIntelAgent:
         if not jobs:
             return
 
+        # Negative reviews per competitor across both platforms -> one finding each
+        negatives: dict[int, tuple[dict, list[str]]] = {}
         with ThreadPoolExecutor(max_workers=8) as pool:
             futures = [(c, p, pool.submit(fetch, store_id)) for c, p, fetch, store_id in jobs]
             for competitor, platform, future in futures:
@@ -287,7 +321,11 @@ class CompetitiveIntelAgent:
                         {"error": f"reviews: {e}", "competitor": competitor["name"], "platform": platform}
                     )
                     continue
-                self._store_reviews(competitor, platform, reviews)
+                found = negatives.setdefault(competitor["id"], (competitor, []))[1]
+                self._store_reviews(competitor, platform, reviews, found)
+
+        for competitor, contents in negatives.values():
+            self._add_negative_reviews_finding(competitor, contents)
 
     def _scan_app_store_reviews(self, competitor: dict, app_id: str) -> int:
         """Fetch recent App Store reviews and store new ones. Returns count added."""
@@ -370,8 +408,18 @@ class CompetitiveIntelAgent:
             })
         return reviews
 
-    def _store_reviews(self, competitor: dict, platform: str, reviews: list[dict]) -> int:
-        """Sanitize, dedupe, and store reviews. Flags negative ones with opportunity keywords."""
+    def _store_reviews(
+        self, competitor: dict, platform: str, reviews: list[dict],
+        negatives: Optional[list[str]] = None,
+    ) -> int:
+        """Sanitize, dedupe, and store reviews.
+
+        New negative reviews with opportunity keywords go into `negatives` for the
+        caller to group. Without that list, this call writes the grouped finding.
+        """
+        group_here = negatives is None
+        if group_here:
+            negatives = []
         added = 0
         for review in reviews:
             content = sanitize_scraped_content(review["content"])
@@ -390,16 +438,34 @@ class CompetitiveIntelAgent:
 
             content_lower = content.lower()
             if int(review["rating"]) <= 2 and any(kw in content_lower for kw in self.OPPORTUNITY_KEYWORDS):
-                db.add_finding(
-                    competitor_id=competitor["id"],
-                    finding_type="opportunity",
-                    title=f"Negative review opportunity ({competitor['name']})",
-                    content=content[:300],
-                    importance=5,
-                )
+                negatives.append(content)
 
+        if group_here:
+            self._add_negative_reviews_finding(competitor, negatives)
         self.results["new_reviews"] += added
         return added
+
+    def _add_negative_reviews_finding(self, competitor: dict, contents: list[str]):
+        """One opportunity finding summarising a scan's negative reviews for a competitor."""
+        if not contents:
+            return
+        keyword_counts = Counter(
+            kw for content in contents for kw in self.OPPORTUNITY_KEYWORDS
+            if kw in content.lower()
+        )
+        keyword, hits = keyword_counts.most_common(1)[0]
+        count = len(contents)
+        noun = "review" if count == 1 else "reviews"
+        db.add_finding(
+            competitor_id=competitor["id"],
+            finding_type="opportunity",
+            title=f"{count} new negative {noun} ({competitor['name']})",
+            content=(
+                f"Most common complaint: \"{keyword}\" ({hits} of {count} {noun}). "
+                f"Example: \"{contents[0][:200]}\""
+            ),
+            importance=5,
+        )
 
     # ── New Entrant Detection ───────────────────────────────────────
 

@@ -44,6 +44,7 @@ async def index():
     aso_changes = db.get_aso_changes(hours=168)
     new_entrants = db.get_new_entrants(hours=720)
     trend_reports = db.get_trend_reports(emerging_only=True)
+    alerts = db.get_recent_alerts(hours=168)
 
     # Pre-render the strategic analysis from the latest digest if available
     strategic_html = ""
@@ -121,12 +122,26 @@ async def index():
             f"</tr>\n"
         )
 
+    # Alerts — messages carry scraped store text, so escape them
+    alert_rows = ""
+    for a in alerts[:10]:
+        severity = a.get("severity") if a.get("severity") in ("high", "medium", "low") else "low"
+        alert_rows += (
+            f"<tr>"
+            f"<td><span class='badge badge-sev-{severity}'>{severity}</span></td>"
+            f"<td>{html.escape(a.get('competitor_name') or '—')}</td>"
+            f"<td>{html.escape(a.get('message') or a.get('title') or '')}</td>"
+            f"<td>{html.escape(str(a.get('created_at') or '—')[:16])}</td>"
+            f"</tr>\n"
+        )
+
     template = _load_template("index.html")
     # Use replacement instead of .format() to avoid CSS brace conflicts
     replacements = {
         "{competitors_count}": str(len(competitors)),
         "{findings_count}": str(len(findings)),
         "{aso_count}": str(len(aso_changes)),
+        "{alerts_count}": str(len(alerts)),
         "{comp_cards}": comp_cards,
         "{findings_rows}": findings_rows or "<tr><td colspan='5' class='muted'>No findings yet. Run a scan.</td></tr>",
         "{aso_rows}": aso_rows or "<tr><td colspan='5' class='muted'>No ASO changes detected.</td></tr>",
@@ -134,6 +149,8 @@ async def index():
         "{trend_rows}": trend_rows or "<tr><td colspan='3' class='muted'>No trends detected.</td></tr>",
         "{strategic_html}": strategic_html or "<p class='muted'>No strategic analysis yet. Click <strong>Run Strategic Analysis</strong> below.</p>",
         "{last_updated}": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        # Last, so placeholder-like text inside scraped alert messages is never replaced
+        "{alert_rows}": alert_rows or "<tr><td colspan='4' class='muted'>No material changes detected. That's the quiet, normal state.</td></tr>",
     }
     for key, val in replacements.items():
         template = template.replace(key, val)
@@ -193,6 +210,23 @@ async def status():
         "findings_24h": len(findings),
         "database": config.database_path,
     }
+
+
+@app.get("/api/alerts")
+def alerts(hours: int = Query(168, ge=1, le=8760)):
+    """Recent alerts, newest first."""
+    return {"alerts": db.get_recent_alerts(hours=hours)}
+
+
+@app.post("/api/alerts/run")
+def run_alerts():
+    """Build alerts from recent changes and send the unsent ones."""
+    from prysma.agents.alerts import AlertEngine
+
+    engine = AlertEngine()
+    built = engine.build_alerts()
+    sent = engine.send_alerts()
+    return {"built": len(built), "sent": sent}
 
 
 @app.get("/api/tavily")
