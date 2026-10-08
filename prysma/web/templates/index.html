@@ -93,6 +93,18 @@
         }
         .search-result a { color: var(--accent); text-decoration: none; font-weight: 600; }
         .search-result p { font-size: 0.85rem; color: var(--muted); margin-top: 0.3rem; }
+        .market-entry { padding: 1.5rem 2rem 0.5rem; }
+        .market-entry h2 { font-size: 1.4rem; margin-bottom: 0.8rem; }
+        .market-entry .search-bar { padding: 0; }
+        .market-entry .search-bar input { font-size: 1rem; padding: 0.8rem 1rem; }
+        #discover-status { margin-top: 0.8rem; }
+        #discover-results { display: none; margin-top: 1rem; }
+        .candidate { display: flex; gap: 0.8rem; align-items: flex-start; }
+        .candidate input[type=checkbox] { margin-top: 0.35rem; width: 1rem; height: 1rem; accent-color: var(--accent); }
+        .candidate a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+        .candidate .features { font-size: 0.8rem; color: var(--muted); }
+        .watch-bar { margin-top: 1rem; display: flex; gap: 1rem; align-items: center; }
+        #gaps-section { display: none; }
         footer { padding: 2rem; text-align: center; color: var(--muted); font-size: 0.8rem; }
         .tech-badge {
             display: inline-block; background: var(--card); border: 1px solid var(--border);
@@ -106,6 +118,22 @@
         <span class="badge-hack">Nebius x NVIDIA Hackathon 2026</span>
     </header>
 
+    <div class="market-entry">
+        <h2>Find your market</h2>
+        <div class="search-bar">
+            <input type="text" id="discover-query" placeholder="Enter your app, a store link, or describe an app idea..." onkeydown="if(event.key==='Enter')discoverCompetitors()">
+            <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
+        </div>
+        <div id="discover-status" class="muted"></div>
+        <div id="discover-results">
+            <div class="grid" id="candidate-grid"></div>
+            <div class="watch-bar">
+                <button class="btn" id="watch-btn" onclick="watchSelected()">Watch selected</button>
+                <span id="watch-status" class="muted"></span>
+            </div>
+        </div>
+    </div>
+
     <div class="stats">
         <div class="stat"><div class="num">{competitors_count}</div><div class="label">Competitors</div></div>
         <div class="stat"><div class="num">{findings_count}</div><div class="label">Findings (7d)</div></div>
@@ -115,7 +143,13 @@
     <div class="actions">
         <a href="/api/scan" class="btn" onclick="triggerScan(event)">▶ Run Scan</a>
         <a href="/api/analyze" class="btn btn-secondary" onclick="triggerAnalyze(event)">🧠 Strategic Analysis (Ultra)</a>
+        <button class="btn btn-secondary" id="gaps-btn" onclick="findGaps()">🕳 Find market gaps</button>
         <a href="/scan" class="btn btn-secondary">📋 Scan Details</a>
+    </div>
+
+    <div class="section" id="gaps-section">
+        <h2>Market Gaps (Nemotron Ultra)</h2>
+        <div class="strategic" id="gaps-report"></div>
     </div>
 
     <div class="search-bar">
@@ -215,6 +249,92 @@
                 document.getElementById('search-results').innerHTML = html;
             })
             .catch(() => document.getElementById('search-results').innerHTML = '<p class="muted">Search failed.</p>');
+    }
+
+    let discovered = [];
+
+    function esc(s) {
+        const div = document.createElement('div');
+        div.textContent = s == null ? '' : String(s);
+        return div.innerHTML;
+    }
+    function safeUrl(u) {
+        return /^https:\/\/(play\.google\.com|apps\.apple\.com)\//.test(u || '') ? u : '';
+    }
+    function discoverCompetitors() {
+        const q = document.getElementById('discover-query').value.trim();
+        if (q.length < 2) return;
+        const status = document.getElementById('discover-status');
+        const btn = document.getElementById('discover-btn');
+        status.textContent = 'Searching the stores and profiling competitors. This can take up to a minute...';
+        btn.disabled = true;
+        document.getElementById('discover-results').style.display = 'none';
+        fetch('/api/discover', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({query: q})
+        })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                discovered = data.candidates || [];
+                if (!discovered.length) {
+                    status.textContent = 'No competitors found. Try another app name or idea.';
+                    return;
+                }
+                let html = '';
+                discovered.forEach((c, i) => {
+                    const url = safeUrl(c.store_url);
+                    const features = (c.features || []).join(' · ');
+                    html += '<div class="card candidate">'
+                        + '<input type="checkbox" class="cand-check" data-index="' + i + '">'
+                        + '<div>'
+                        + '<h3>' + esc(c.name) + '</h3>'
+                        + '<p class="small">' + esc(c.platform) + ' · ' + (c.rating != null ? esc(c.rating) + '★' : 'no rating')
+                        + ' · ' + esc(c.price || 'price unknown') + '</p>'
+                        + '<p class="muted">' + esc(c.summary) + '</p>'
+                        + (features ? '<p class="features">' + esc(features) + '</p>' : '')
+                        + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">Store page ↗</a>' : '')
+                        + '</div></div>';
+                });
+                document.getElementById('candidate-grid').innerHTML = html;
+                document.getElementById('discover-results').style.display = 'block';
+                status.textContent = discovered.length + ' candidates found. Select the apps to watch.';
+            })
+            .catch(() => status.textContent = 'Discovery failed. Try again.')
+            .finally(() => btn.disabled = false);
+    }
+    function watchSelected() {
+        const picked = Array.from(document.querySelectorAll('.cand-check:checked'))
+            .map(el => discovered[Number(el.dataset.index)]);
+        const status = document.getElementById('watch-status');
+        if (!picked.length) {
+            status.textContent = 'Select at least one app.';
+            return;
+        }
+        fetch('/api/watch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({candidates: picked})
+        })
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(d => {
+                alert('Now watching ' + d.added + ' competitor(s).');
+                location.reload();
+            })
+            .catch(() => status.textContent = 'Could not save the selection.');
+    }
+    function findGaps() {
+        const section = document.getElementById('gaps-section');
+        const report = document.getElementById('gaps-report');
+        const btn = document.getElementById('gaps-btn');
+        section.style.display = 'block';
+        report.innerHTML = '<p class="muted">Analyzing market gaps with Nemotron Ultra. This can take 2-3 minutes...</p>';
+        btn.disabled = true;
+        fetch('/api/gaps', {method: 'POST'})
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(d => report.innerHTML = esc(d.report).replace(/\n/g, '<br>'))
+            .catch(() => report.innerHTML = '<p class="muted">Gap analysis failed.</p>')
+            .finally(() => btn.disabled = false);
     }
     </script>
 </body>

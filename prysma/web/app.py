@@ -5,6 +5,8 @@ Run: python -m prysma.web --host 0.0.0.0 --port 8000
 """
 import argparse
 import asyncio
+import html
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +14,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field
 import uvicorn
 
 from prysma.config import config
@@ -54,7 +57,7 @@ async def index():
     except Exception:
         pass
     if digests:
-        strategic_html = digests[0].get("content", "").replace("\n", "<br>\n")
+        strategic_html = html.escape(digests[0].get("content", "")).replace("\n", "<br>\n")
 
     # Build findings table
     findings_rows = ""
@@ -73,11 +76,12 @@ async def index():
     comp_cards = ""
     for c in competitors:
         store_ids = c.get("store_ids", "") or ""
+        # Names and descriptions now come from scraped listings via /api/watch, so escape them
         comp_cards += (
             f"<div class='card'>"
-            f"<h3>{c['name']}</h3>"
-            f"<p class='muted'>{c.get('description', '') or ''}</p>"
-            f"<p class='small'>Website: {c.get('website', '—') or '—'}</p>"
+            f"<h3>{html.escape(c['name'])}</h3>"
+            f"<p class='muted'>{html.escape(c.get('description', '') or '')}</p>"
+            f"<p class='small'>Website: {html.escape(c.get('website', '—') or '—')}</p>"
             f"</div>\n"
         )
 
@@ -144,7 +148,7 @@ async def scan_page():
 
 
 @app.post("/api/scan")
-async def run_scan():
+def run_scan():
     """Trigger a scan cycle in a background thread."""
     from prysma.main import run_scan_cycle
 
@@ -160,7 +164,7 @@ async def run_scan():
 
 
 @app.post("/api/analyze")
-async def run_analyze():
+def run_analyze():
     """Trigger strategic analysis with Nemotron Ultra."""
     from prysma.agents.analyst import AnalystAgent
 
@@ -192,7 +196,7 @@ async def status():
 
 
 @app.get("/api/tavily")
-async def tavily_search(query: str = Query(..., min_length=2)):
+def tavily_search(query: str = Query(..., min_length=2)):
     """Run a Tavily web search."""
     if not config.tavily_api_key:
         return JSONResponse({"error": "TAVILY_API_KEY not configured"}, status_code=400)
@@ -201,6 +205,74 @@ async def tavily_search(query: str = Query(..., min_length=2)):
     source = TavilySource()
     results = source.search(query, max_results=5)
     return {"query": query, "results": results}
+
+
+class DiscoverRequest(BaseModel):
+    query: str = Field(..., min_length=2, max_length=500)
+
+
+class WatchRequest(BaseModel):
+    candidates: list[dict] = Field(..., max_length=50)
+
+
+@app.post("/api/discover")
+def discover(body: DiscoverRequest):
+    """Find candidate competitors for an app, store link, or idea, then profile them."""
+    from prysma.agents.discovery import DiscoveryAgent
+
+    agent = DiscoveryAgent()
+    try:
+        candidates = agent.discover(body.query)
+    finally:
+        agent.close()
+    return {"query": body.query, "candidates": candidates}
+
+
+def _clean_store_url(url) -> Optional[str]:
+    """Keep only Google Play and App Store https links."""
+    if isinstance(url, str) and re.match(r"https://(play\.google\.com|apps\.apple\.com)/", url):
+        return url[:500]
+    return None
+
+
+@app.post("/api/watch")
+def watch(body: WatchRequest):
+    """Add the selected candidates to the competitor list."""
+    added = 0
+    for cand in body.candidates:
+        name = str(cand.get("name") or "").strip()[:100]
+        if not name:
+            continue
+        store_ids = {}
+        package = cand.get("package")
+        if isinstance(package, str) and re.fullmatch(r"[A-Za-z0-9_.]{1,200}", package):
+            store_ids["android"] = package
+        ios_id = cand.get("ios_id")
+        if ios_id is not None and re.fullmatch(r"\d{1,15}", str(ios_id)):
+            store_ids["ios"] = str(ios_id)
+
+        competitor_id = db.add_competitor(
+            name=name,
+            website=_clean_store_url(cand.get("store_url")),
+            description=str(cand.get("summary") or "")[:300] or None,
+            store_ids=store_ids,
+        )
+        if competitor_id:
+            added += 1
+    return {"added": added}
+
+
+@app.post("/api/gaps")
+def gaps():
+    """Run the market gap analysis with Nemotron Ultra and return the report."""
+    from prysma.agents.analyst import AnalystAgent
+
+    analyst = AnalystAgent()
+    try:
+        report = analyst.generate_gap_analysis()
+    finally:
+        analyst.close()
+    return {"report": report}
 
 
 def main():
