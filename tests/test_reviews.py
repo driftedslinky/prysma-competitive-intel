@@ -171,9 +171,57 @@ class TestScanReviews:
         competitor = next(c for c in test_db.get_active_competitors() if c["name"] == "Tabata Timer")
         assert agent._store_ids(competitor)["ios"] == "id1255964203"
 
+    def test_negative_reviews_group_into_one_finding_per_competitor(self, agent, test_db):
+        test_db.set_competitor_store_ids(test_db.get_competitor_by_name("Rival"),
+                                         {"ios": "id1", "android": "com.rival"})
+        test_db.add_competitor("Other")
+        test_db.set_competitor_store_ids(test_db.get_competitor_by_name("Other"), {"ios": "id2"})
+        _stub_get(agent, APP_STORE_FEED)  # 1 negative: "Too many ads, it crashes"
+        _stub_post(agent, _play_response(PLAY_ROWS + [
+            ["id-3", ["Eve", [None, 2]], 2, None, "Constant crash, useless", [1791395865, 0], 0],
+            ["id-4", ["Fay", [None, 2]], 1, None, "Crash after update", [1791395865, 0], 0],
+        ]))
+
+        agent._scan_reviews()
+
+        assert agent.results["new_reviews"] == 8  # individual reviews still stored
+        findings = test_db.get_recent_findings(hours=24, finding_type="opportunity")
+        by_title = {f["title"]: f for f in findings}
+        assert set(by_title) == {"4 new negative reviews (Rival)", "1 new negative review (Other)"}
+        assert '"crash" (4 of 4 reviews)' in by_title["4 new negative reviews (Rival)"]["content"]
+
     def test_fetch_failure_counts_error(self, agent, test_db):
         test_db.set_competitor_store_ids(test_db.get_competitor_by_name("Rival"), {"ios": "id1"})
         agent.client.get.side_effect = RuntimeError("network down")
         agent._scan_reviews()
         assert agent.results["errors"] == 1
         assert agent.results["new_reviews"] == 0
+
+
+class TestPlayDescription:
+    extract = staticmethod(CompetitiveIntelAgent._extract_play_description)
+
+    def test_json_ld_block_parses_to_description(self):
+        page = (
+            '<script type="application/ld+json" nonce="x">{"@type":"BreadcrumbList"}</script>'
+            '<script type="application/ld+json" nonce="x">{"@type":"SoftwareApplication",'
+            '"description":"Short and \\"quoted\\".","operatingSystem":"ANDROID",'
+            '"aggregateRating":{"ratingValue":"4.7","ratingCount":"33808"}}</script>'
+        )
+        assert self.extract(page) == 'Short and "quoted".'
+
+    def test_non_greedy_fallback(self):
+        page = '<div>"description":"First one","other":"x","description":"Second one"</div>'
+        assert self.extract(page) == "First one"
+
+    def test_none_when_only_match_contains_rating_count(self):
+        assert self.extract('"description":"Block apps. ratingCount:33808 aggregateRating"') is None
+        page = ('<script type="application/ld+json">'
+                '{"description":"Block apps.\\",\\"ratingCount\\":\\"33808"}</script>')
+        assert self.extract(page) is None
+
+    def test_none_when_unbalanced_braces(self):
+        assert self.extract('"description":"Block apps {"') is None
+
+    def test_none_when_missing(self):
+        assert self.extract("<html></html>") is None

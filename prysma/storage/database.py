@@ -202,6 +202,21 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_competitor_updates_date ON competitor_updates(release_date);
                 CREATE INDEX IF NOT EXISTS idx_pricing_history_date ON pricing_history(detected_at);
                 CREATE INDEX IF NOT EXISTS idx_new_entrants_detected ON new_entrants(detected_at);
+
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    competitor_id INTEGER,
+                    alert_type TEXT,
+                    severity TEXT CHECK(severity IN ('high','medium','low')),
+                    title TEXT NOT NULL,
+                    message TEXT,
+                    source_table TEXT,
+                    source_id INTEGER,
+                    is_sent BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source_table, source_id);
             """)
 
             # Migration: per-competitor app store IDs as JSON {"android": ..., "ios": ...}
@@ -657,6 +672,44 @@ class Database:
         query += " ORDER BY detected_at DESC"
         with self.get_conn() as conn:
             rows = conn.execute(query, params).fetchall()
+            return self._rows_to_dicts(rows)
+
+    # Alerts
+    def add_alert(self, competitor_id: int, alert_type: str, severity: str, title: str,
+                  message: str, source_table: str, source_id: int) -> Optional[int]:
+        """Insert an alert. Returns the new id, or None if the source row already has one."""
+        with self.get_conn() as conn:
+            cursor = conn.execute(
+                """INSERT OR IGNORE INTO alerts
+                    (competitor_id, alert_type, severity, title, message, source_table, source_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (competitor_id, alert_type, severity, title, message, source_table, source_id)
+            )
+            return cursor.lastrowid if cursor.rowcount else None
+
+    def get_unsent_alerts(self) -> list[dict]:
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT a.*, c.name as competitor_name FROM alerts a
+                   LEFT JOIN competitors c ON a.competitor_id = c.id
+                   WHERE a.is_sent = 0 ORDER BY a.id"""
+            ).fetchall()
+            return self._rows_to_dicts(rows)
+
+    def mark_alert_sent(self, alert_id: int):
+        with self.get_conn() as conn:
+            conn.execute("UPDATE alerts SET is_sent = 1 WHERE id = ?", (alert_id,))
+
+    def get_recent_alerts(self, hours: int = 168, limit: int = 50) -> list[dict]:
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT a.*, c.name as competitor_name FROM alerts a
+                   LEFT JOIN competitors c ON a.competitor_id = c.id
+                   WHERE a.created_at > datetime('now', ?)
+                   ORDER BY a.created_at DESC, a.id DESC LIMIT ?""",
+                (cutoff, limit)
+            ).fetchall()
             return self._rows_to_dicts(rows)
 
 

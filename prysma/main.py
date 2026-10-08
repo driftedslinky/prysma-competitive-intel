@@ -10,6 +10,7 @@ from prysma.agents.scout import ScoutAgent
 from prysma.agents.trend_radar import TrendRadar
 from prysma.agents.reporter import ReporterAgent
 from prysma.agents.competitive_intel import CompetitiveIntelAgent
+from prysma.agents.alerts import AlertEngine
 from prysma.dashboard import DashboardGenerator
 from prysma.insights import ActionableInsights
 from prysma.reports import ReportGenerator
@@ -37,6 +38,12 @@ def run_scan_cycle():
     intel_results = intel.run_full_scan()
     intel.close()
     print(f"  Competitive Intel: {intel_results['listings_checked']} checked, {intel_results['changes_detected']} changes, {intel_results['new_reviews']} new reviews, {intel_results['new_entrants']} new entrants, {intel_results['errors']} errors")
+
+    # Alerts: only material changes, each sent once
+    engine = AlertEngine()
+    built = engine.build_alerts()
+    sent = engine.send_alerts()
+    print(f"  Alerts: {len(built)} built, {sent} sent")
 
 
 def run_digest():

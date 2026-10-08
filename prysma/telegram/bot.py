@@ -88,6 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/report <name> — PDF report\n"
         "/eli5 <query> — Explain like I'm 5\n"
         "/actionplan — Weekly action plan\n"
+        "/alerts — Recent material changes\n"
         "/status — System status\n"
         "/help — Show help"
     )
@@ -118,6 +119,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/report <name> — PDF report\n"
         "/actionplan — Weekly action plan\n\n"
         "*System:*\n"
+        "/alerts — Recent material changes\n"
         "/status — System status\n"
         "/help — Show this help"
     )
@@ -537,6 +539,25 @@ async def tavily(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @authorized_only
+async def alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /alerts command — show recent alerts."""
+    user_id = update.effective_user.id
+
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Too many requests. Please wait a minute.")
+        return
+
+    recent = db.get_recent_alerts(hours=168, limit=10)
+    if not recent:
+        await update.message.reply_text("✅ No material changes in the last 7 days. That's the quiet, normal state.")
+        return
+
+    from prysma.agents.alerts import format_alert
+    text = "\n\n".join(format_alert(a) for a in recent)
+    await reply_long(update, f"🔔 *Recent alerts (7d)*\n\n{text}")
+
+
+@authorized_only
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command — show system status."""
     competitors = db.get_active_competitors()
@@ -575,6 +596,7 @@ def create_application() -> Application:
     app.add_handler(CommandHandler("actionplan", actionplan))
     app.add_handler(CommandHandler("analyze", analyze))
     app.add_handler(CommandHandler("tavily", tavily))
+    app.add_handler(CommandHandler("alerts", alerts))
     app.add_handler(CommandHandler("status", status))
 
     return app

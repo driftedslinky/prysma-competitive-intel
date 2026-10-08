@@ -68,6 +68,9 @@
         .badge-funding { background: var(--orange); color: var(--bg); }
         .badge-negative_news { background: var(--red); color: var(--bg); }
         .badge-content { background: var(--muted); color: var(--bg); }
+        .badge-sev-high { background: var(--red); color: var(--bg); }
+        .badge-sev-medium { background: var(--orange); color: var(--bg); }
+        .badge-sev-low { background: var(--muted); color: var(--bg); }
         .actions { padding: 1rem 2rem; display: flex; gap: 1rem; flex-wrap: wrap; }
         .btn {
             background: var(--accent); color: var(--bg); border: none;
@@ -138,6 +141,7 @@
         <div class="stat"><div class="num">{competitors_count}</div><div class="label">Competitors</div></div>
         <div class="stat"><div class="num">{findings_count}</div><div class="label">Findings (7d)</div></div>
         <div class="stat"><div class="num">{aso_count}</div><div class="label">ASO Changes</div></div>
+        <div class="stat"><div class="num">{alerts_count}</div><div class="label">Alerts (7d)</div></div>
     </div>
 
     <div class="actions">
@@ -157,6 +161,14 @@
         <button class="btn" onclick="tavilySearch()">Search</button>
     </div>
     <div id="search-results"></div>
+
+    <div class="section">
+        <h2>Alerts</h2>
+        <table>
+            <thead><tr><th>Severity</th><th>Competitor</th><th>What changed</th><th>When (UTC)</th></tr></thead>
+            <tbody>{alert_rows}</tbody>
+        </table>
+    </div>
 
     <div class="section">
         <h2>Competitors</h2>
