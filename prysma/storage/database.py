@@ -1,7 +1,7 @@
 """Database models and operations for Prysma."""
+import hashlib
 import json
 import sqlite3
-from datetime import datetime, timedelta
 from typing import Optional
 from contextlib import contextmanager
 
@@ -209,6 +209,20 @@ class Database:
             if 'store_ids' not in columns:
                 conn.execute("ALTER TABLE competitors ADD COLUMN store_ids TEXT")
 
+            # Migration: review content hash for dedupe; backfill existing rows
+            columns = [row['name'] for row in conn.execute("PRAGMA table_info(competitor_reviews)")]
+            if 'content_hash' not in columns:
+                conn.execute("ALTER TABLE competitor_reviews ADD COLUMN content_hash TEXT")
+                rows = conn.execute("SELECT id, content FROM competitor_reviews").fetchall()
+                conn.executemany(
+                    "UPDATE competitor_reviews SET content_hash = ? WHERE id = ?",
+                    [(self._review_hash(row['content']), row['id']) for row in rows]
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_competitor_reviews_hash "
+                "ON competitor_reviews(competitor_id, content_hash)"
+            )
+
     # Competitor operations
     def add_competitor(self, name: str, website: str = None, description: str = None,
                        store_ids: dict = None) -> int:
@@ -331,22 +345,22 @@ class Database:
             return row is not None
 
     def get_recent_findings(self, hours: int = 24, finding_type: str = None) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         with self.get_conn() as conn:
             if finding_type:
                 rows = conn.execute(
                     """SELECT f.*, c.name as competitor_name FROM findings f 
                        LEFT JOIN competitors c ON f.competitor_id = c.id
-                       WHERE f.finding_type = ? AND f.created_at > ? 
+                       WHERE f.finding_type = ? AND f.created_at > datetime('now', ?) 
                        ORDER BY f.importance DESC""",
-                    (finding_type, cutoff.isoformat())
+                    (finding_type, cutoff)
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """SELECT f.*, c.name as competitor_name FROM findings f 
                        LEFT JOIN competitors c ON f.competitor_id = c.id
-                       WHERE f.created_at > ? ORDER BY f.importance DESC""",
-                    (cutoff.isoformat(),)
+                       WHERE f.created_at > datetime('now', ?) ORDER BY f.importance DESC""",
+                    (cutoff,)
                 ).fetchall()
             return self._rows_to_dicts(rows)
 
@@ -391,9 +405,9 @@ class Database:
 
     def get_trend_signals(self, days: int = None, unprocessed_only: bool = False) -> list[dict]:
         days = days or config.trend_lookback_days
-        cutoff = datetime.now() - timedelta(days=days)
-        query = "SELECT * FROM trend_signals WHERE detected_at > ?"
-        params = [cutoff.isoformat()]
+        cutoff = f"-{days} days"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        query = "SELECT * FROM trend_signals WHERE detected_at > datetime('now', ?)"
+        params = [cutoff]
 
         if unprocessed_only:
             query += " AND is_processed = 0"
@@ -512,46 +526,59 @@ class Database:
             return self._rows_to_dicts(rows)
 
     def get_aso_changes(self, hours: int = 24) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         with self.get_conn() as conn:
             rows = conn.execute(
                 """SELECT ac.*, c.name as competitor_name FROM aso_changes ac
                    LEFT JOIN competitors c ON ac.competitor_id = c.id
-                   WHERE ac.detected_at > ? ORDER BY ac.detected_at DESC""",
-                (cutoff.isoformat(),)
+                   WHERE ac.detected_at > datetime('now', ?) ORDER BY ac.detected_at DESC""",
+                (cutoff,)
             ).fetchall()
             return self._rows_to_dicts(rows)
 
     # Competitor Reviews
+    @staticmethod
+    def _review_hash(content: str) -> str:
+        return hashlib.sha256((content or '').strip().lower().encode('utf-8')).hexdigest()
+
+    def review_exists(self, competitor_id: int, content: str) -> bool:
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM competitor_reviews WHERE competitor_id = ? AND content_hash = ? LIMIT 1",
+                (competitor_id, self._review_hash(content))
+            ).fetchone()
+            return row is not None
+
     def add_review(self, competitor_id: int, platform: str, rating: int,
                    title: str, content: str, author: str, review_date: str) -> int:
         with self.get_conn() as conn:
             cursor = conn.execute(
                 """INSERT INTO competitor_reviews
-                    (competitor_id, platform, rating, title, content, author, review_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (competitor_id, platform, rating, title, content, author, review_date)
+                    (competitor_id, platform, rating, title, content, author, review_date, content_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (competitor_id, platform, rating, title, content, author, review_date,
+                 self._review_hash(content))
             )
             return cursor.lastrowid
 
     def get_recent_reviews(self, competitor_id: int = None, rating_max: int = 5, hours: int = 24) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         with self.get_conn() as conn:
             if competitor_id:
                 rows = conn.execute(
                     """SELECT cr.*, c.name as competitor_name FROM competitor_reviews cr
                        LEFT JOIN competitors c ON cr.competitor_id = c.id
-                       WHERE cr.competitor_id = ? AND cr.rating <= ? AND cr.detected_at > ?
+                       WHERE cr.competitor_id = ? AND cr.rating <= ? AND cr.detected_at > datetime('now', ?)
                        ORDER BY cr.detected_at DESC""",
-                    (competitor_id, rating_max, cutoff.isoformat())
+                    (competitor_id, rating_max, cutoff)
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """SELECT cr.*, c.name as competitor_name FROM competitor_reviews cr
                        LEFT JOIN competitors c ON cr.competitor_id = c.id
-                       WHERE cr.rating <= ? AND cr.detected_at > ?
+                       WHERE cr.rating <= ? AND cr.detected_at > datetime('now', ?)
                        ORDER BY cr.detected_at DESC""",
-                    (rating_max, cutoff.isoformat())
+                    (rating_max, cutoff)
                 ).fetchall()
             return self._rows_to_dicts(rows)
 
@@ -568,13 +595,13 @@ class Database:
             return cursor.lastrowid
 
     def get_recent_updates(self, hours: int = 168) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         with self.get_conn() as conn:
             rows = conn.execute(
                 """SELECT cu.*, c.name as competitor_name FROM competitor_updates cu
                    LEFT JOIN competitors c ON cu.competitor_id = c.id
-                   WHERE cu.detected_at > ? ORDER BY cu.detected_at DESC""",
-                (cutoff.isoformat(),)
+                   WHERE cu.detected_at > datetime('now', ?) ORDER BY cu.detected_at DESC""",
+                (cutoff,)
             ).fetchall()
             return self._rows_to_dicts(rows)
 
@@ -591,22 +618,22 @@ class Database:
             return cursor.lastrowid
 
     def get_pricing_history(self, competitor_id: int = None, hours: int = 168) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         with self.get_conn() as conn:
             if competitor_id:
                 rows = conn.execute(
                     """SELECT ph.*, c.name as competitor_name FROM pricing_history ph
                        LEFT JOIN competitors c ON ph.competitor_id = c.id
-                       WHERE ph.competitor_id = ? AND ph.detected_at > ?
+                       WHERE ph.competitor_id = ? AND ph.detected_at > datetime('now', ?)
                        ORDER BY ph.detected_at DESC""",
-                    (competitor_id, cutoff.isoformat())
+                    (competitor_id, cutoff)
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """SELECT ph.*, c.name as competitor_name FROM pricing_history ph
                        LEFT JOIN competitors c ON ph.competitor_id = c.id
-                       WHERE ph.detected_at > ? ORDER BY ph.detected_at DESC""",
-                    (cutoff.isoformat(),)
+                       WHERE ph.detected_at > datetime('now', ?) ORDER BY ph.detected_at DESC""",
+                    (cutoff,)
                 ).fetchall()
             return self._rows_to_dicts(rows)
 
@@ -622,9 +649,9 @@ class Database:
             return cursor.lastrowid
 
     def get_new_entrants(self, hours: int = 168, unreviewed_only: bool = False) -> list[dict]:
-        cutoff = datetime.now() - timedelta(hours=hours)
-        query = "SELECT * FROM new_entrants WHERE detected_at > ?"
-        params = [cutoff.isoformat()]
+        cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        query = "SELECT * FROM new_entrants WHERE detected_at > datetime('now', ?)"
+        params = [cutoff]
         if unreviewed_only:
             query += " AND is_reviewed = 0"
         query += " ORDER BY detected_at DESC"

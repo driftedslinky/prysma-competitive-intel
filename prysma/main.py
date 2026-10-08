@@ -36,7 +36,7 @@ def run_scan_cycle():
     intel = CompetitiveIntelAgent()
     intel_results = intel.run_full_scan()
     intel.close()
-    print(f"  Competitive Intel: {intel_results['listings_checked']} checked, {intel_results['changes_detected']} changes, {intel_results['new_entrants']} new entrants")
+    print(f"  Competitive Intel: {intel_results['listings_checked']} checked, {intel_results['changes_detected']} changes, {intel_results['new_reviews']} new reviews, {intel_results['new_entrants']} new entrants, {intel_results['errors']} errors")
 
 
 def run_digest():

@@ -1,15 +1,17 @@
 """Competitive Intelligence Agent — Tracks ASO, reviews, pricing, and updates."""
 
 import hashlib
+import json
 import re
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote_plus
 
 import httpx
 from bs4 import BeautifulSoup
 
-from prysma.storage.database import db
+from prysma.storage.database import DEFAULT_COMPETITOR_STORE_IDS, db
 from prysma.security import sanitize_scraped_content
 from prysma.config import config
 
@@ -52,8 +54,8 @@ class CompetitiveIntelAgent:
         # Scan app store listings
         self._scan_app_listings()
 
-        # Scan for negative reviews (opportunity detection)
-        self._scan_negative_reviews()
+        # Collect reviews (gap analysis input; negative ones become opportunity findings)
+        self._scan_reviews()
 
         # Scan for new entrants
         self._scan_new_entrants()
@@ -244,87 +246,150 @@ class CompetitiveIntelAgent:
                     importance=4 if change_type in ("title", "price") else 3,
                 )
 
-    # ── Negative Review Monitoring ──────────────────────────────────
+    # ── Review Collection ───────────────────────────────────────────
 
-    def _scan_negative_reviews(self):
-        """Scan for new negative reviews across competitors."""
-        competitors = db.get_active_competitors()
-        for competitor in competitors:
-            store_ids = db.get_competitor_store_ids(competitor)
+    OPPORTUNITY_KEYWORDS = [
+        "screen off", "stops", "background", "ads", "subscription", "expensive",
+        "too many", "doesn't work", "crash", "bug", "slow", "ugly", "confusing",
+        "complicated",
+    ]
+
+    def _store_ids(self, competitor: dict) -> dict:
+        """Store IDs from the database; seed map only when the column is empty."""
+        return (
+            db.get_competitor_store_ids(competitor)
+            or DEFAULT_COMPETITOR_STORE_IDS.get(competitor["name"], {})
+        )
+
+    def _scan_reviews(self):
+        """Collect App Store and Google Play reviews for every active competitor.
+
+        Fetches run in parallel (network-bound); database writes stay on this thread.
+        """
+        jobs = []
+        for competitor in db.get_active_competitors():
+            store_ids = self._store_ids(competitor)
+            if store_ids.get("ios"):
+                jobs.append((competitor, "ios", self._fetch_app_store_reviews, store_ids["ios"]))
             if store_ids.get("android"):
+                jobs.append((competitor, "android", self._fetch_play_reviews, store_ids["android"]))
+        if not jobs:
+            return
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [(c, p, pool.submit(fetch, store_id)) for c, p, fetch, store_id in jobs]
+            for competitor, platform, future in futures:
                 try:
-                    self._scan_play_reviews(competitor, store_ids["android"])
+                    reviews = future.result()
                 except Exception as e:
                     self.results["errors"] += 1
+                    self.results["details"].append(
+                        {"error": f"reviews: {e}", "competitor": competitor["name"], "platform": platform}
+                    )
+                    continue
+                self._store_reviews(competitor, platform, reviews)
 
-    def _scan_play_reviews(self, competitor: dict, package_name: str):
-        """Scan Google Play reviews for a competitor."""
-        url = f"https://play.google.com/store/apps/details?id={package_name}&hl=en&showAllReviews=true"
+    def _scan_app_store_reviews(self, competitor: dict, app_id: str) -> int:
+        """Fetch recent App Store reviews and store new ones. Returns count added."""
+        return self._store_reviews(competitor, "ios", self._fetch_app_store_reviews(app_id))
+
+    def _scan_play_reviews(self, competitor: dict, package_name: str) -> int:
+        """Fetch recent Google Play reviews and store new ones. Returns count added."""
+        return self._store_reviews(competitor, "android", self._fetch_play_reviews(package_name))
+
+    def _fetch_app_store_reviews(self, app_id: str) -> list[dict]:
+        """Most recent App Store reviews from the public customer-reviews RSS feed."""
+        numeric_id = app_id[2:] if app_id.lower().startswith("id") else app_id
+        url = f"https://itunes.apple.com/gb/rss/customerreviews/id={numeric_id}/sortBy=mostRecent/json"
         resp = self.client.get(url)
         resp.raise_for_status()
+        return self._parse_app_store_reviews(resp.json())
 
-        soup = BeautifulSoup(resp.text, "lxml")
-
-        # Look for review sections
-        review_blocks = soup.find_all("div", class_="UD7Dzf")
-        for block in review_blocks[:20]:  # Limit to first 20
-            # Rating
-            rating_tag = block.find_previous("div", class_="pf5lIe")
-            rating = 5
-            if rating_tag:
-                aria = rating_tag.get("aria-label", "")
-                match = re.search(r"Rated (\d)", aria)
-                if match:
-                    rating = int(match.group(1))
-
-            # Only track negative reviews (1-2 stars)
-            if rating > 2:
+    @staticmethod
+    def _parse_app_store_reviews(data: dict) -> list[dict]:
+        entries = data.get("feed", {}).get("entry", [])
+        if isinstance(entries, dict):  # a feed with one entry is not a list
+            entries = [entries]
+        reviews = []
+        for entry in entries:
+            # Feed-metadata entries carry no rating
+            rating = entry.get("im:rating", {}).get("label")
+            if not rating:
                 continue
+            reviews.append({
+                "rating": int(rating),
+                "title": entry.get("title", {}).get("label", ""),
+                "content": entry.get("content", {}).get("label", ""),
+                "author": entry.get("author", {}).get("name", {}).get("label", ""),
+                "review_date": entry.get("updated", {}).get("label", "")[:10],
+            })
+        return reviews
 
-            content_tag = block.find("span", jsname="fbQN7e")
-            if not content_tag:
-                content_tag = block.find("span", class_="review-body")
+    def _fetch_play_reviews(self, package_name: str, count: int = 50) -> list[dict]:
+        """Newest Google Play reviews via the Play web app's batchexecute endpoint.
 
-            content = content_tag.get_text(strip=True) if content_tag else ""
-            if not content or len(content) < 20:
+        This is the internal RPC the Play website itself calls (rpc id UsvDTd).
+        It is undocumented and may change; a changed shape raises ValueError.
+        """
+        payload = json.dumps([None, None, [2, 2, [count, None, None], None, []], [package_name, 7]])
+        resp = self.client.post(
+            "https://play.google.com/_/PlayStoreUi/data/batchexecute?hl=en&gl=gb",
+            data={"f.req": json.dumps([[["UsvDTd", payload, None, "generic"]]])},
+        )
+        resp.raise_for_status()
+        return self._parse_play_reviews(resp.text)
+
+    @staticmethod
+    def _parse_play_reviews(text: str) -> list[dict]:
+        # Response: ")]}'" guard line, then [["wrb.fr", "UsvDTd", "<json string>", ...], ...]
+        envelope = json.loads(text.split("\n", 1)[1])
+        inner = next(
+            (row[2] for row in envelope if len(row) > 2 and row[0] == "wrb.fr" and row[1] == "UsvDTd"),
+            None,
+        )
+        if inner is None:
+            raise ValueError("Play reviews: no UsvDTd payload in response")
+        data = json.loads(inner)
+        if not data or not data[0]:
+            return []
+        reviews = []
+        for row in data[0]:
+            # [review_id, [author, ...], rating, null, text, [epoch_s, nanos], ...]
+            if not (isinstance(row, list) and len(row) > 5 and isinstance(row[2], int)):
+                raise ValueError("Play reviews: unexpected review shape")
+            timestamp = row[5][0] if row[5] else None
+            reviews.append({
+                "rating": row[2],
+                "title": "",
+                "content": row[4] or "",
+                "author": (row[1] or [""])[0] or "",
+                "review_date": (
+                    datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+                    if timestamp else None
+                ),
+            })
+        return reviews
+
+    def _store_reviews(self, competitor: dict, platform: str, reviews: list[dict]) -> int:
+        """Sanitize, dedupe, and store reviews. Flags negative ones with opportunity keywords."""
+        added = 0
+        for review in reviews:
+            content = sanitize_scraped_content(review["content"])
+            if not content or db.review_exists(competitor["id"], content):
                 continue
-
-            # Check for common opportunity keywords
-            opportunity_keywords = [
-                "screen off",
-                "stops",
-                "background",
-                "ads",
-                "subscription",
-                "expensive",
-                "too many",
-                "doesn't work",
-                "crash",
-                "bug",
-                "slow",
-                "ugly",
-                "confusing",
-                "complicated",
-            ]
-
-            content_lower = content.lower()
-            is_opportunity = any(kw in content_lower for kw in opportunity_keywords)
-
-            # Add to database
             db.add_review(
                 competitor_id=competitor["id"],
-                platform="android",
-                rating=rating,
-                title="",
-                content=content[:500],
-                author="User",
-                review_date=datetime.now().strftime("%Y-%m-%d"),
+                platform=platform,
+                rating=int(review["rating"]),
+                title=sanitize_scraped_content(review["title"]),
+                content=content,
+                author=sanitize_scraped_content(review["author"]),
+                review_date=sanitize_scraped_content(review["review_date"]),
             )
+            added += 1
 
-            self.results["new_reviews"] += 1
-
-            # Create finding for opportunity keywords
-            if is_opportunity:
+            content_lower = content.lower()
+            if int(review["rating"]) <= 2 and any(kw in content_lower for kw in self.OPPORTUNITY_KEYWORDS):
                 db.add_finding(
                     competitor_id=competitor["id"],
                     finding_type="opportunity",
@@ -332,6 +397,9 @@ class CompetitiveIntelAgent:
                     content=content[:300],
                     importance=5,
                 )
+
+        self.results["new_reviews"] += added
+        return added
 
     # ── New Entrant Detection ───────────────────────────────────────
 
