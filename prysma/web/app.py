@@ -8,6 +8,8 @@ import asyncio
 import html
 import re
 import threading
+import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -21,7 +23,33 @@ from prysma.config import config
 from prysma.storage.database import db
 
 
-app = FastAPI(title="Prysma", description="AI-Powered Competitive Intelligence Agent")
+app = FastAPI(
+    title="Prysma",
+    description="AI-Powered Competitive Intelligence Agent",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+# Per-IP hourly limit for the endpoints that spend Nebius and Tavily credits.
+RATE_LIMIT_PER_HOUR = 20
+RATE_LIMIT_WINDOW_SECONDS = 3600
+_rate_hits: dict[str, deque] = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limited(request: Request) -> Optional[JSONResponse]:
+    """Record a hit for this client IP. Return a 429 response if it is over the cap."""
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _rate_lock:
+        hits = _rate_hits.setdefault(ip, deque())
+        while hits and now - hits[0] >= RATE_LIMIT_WINDOW_SECONDS:
+            hits.popleft()
+        if len(hits) >= RATE_LIMIT_PER_HOUR:
+            return JSONResponse({"error": "Rate limit reached for now. Try again later."}, status_code=429)
+        hits.append(now)
+    return None
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 INDEX_HTML = TEMPLATE_DIR / "index.html"
@@ -165,8 +193,10 @@ async def scan_page():
 
 
 @app.post("/api/scan")
-def run_scan():
+def run_scan(request: Request):
     """Trigger a scan cycle in a background thread."""
+    if limited := _rate_limited(request):
+        return limited
     from prysma.main import run_scan_cycle
 
     def _run():
@@ -181,8 +211,10 @@ def run_scan():
 
 
 @app.post("/api/analyze")
-def run_analyze():
+def run_analyze(request: Request):
     """Trigger strategic analysis with Nemotron Ultra."""
+    if limited := _rate_limited(request):
+        return limited
     from prysma.agents.analyst import AnalystAgent
 
     def _run():
@@ -219,8 +251,10 @@ def alerts(hours: int = Query(168, ge=1, le=8760)):
 
 
 @app.post("/api/alerts/run")
-def run_alerts():
+def run_alerts(request: Request):
     """Build alerts from recent changes and send the unsent ones."""
+    if limited := _rate_limited(request):
+        return limited
     from prysma.agents.alerts import AlertEngine
 
     engine = AlertEngine()
@@ -230,8 +264,10 @@ def run_alerts():
 
 
 @app.get("/api/tavily")
-def tavily_search(query: str = Query(..., min_length=2)):
+def tavily_search(request: Request, query: str = Query(..., min_length=2)):
     """Run a Tavily web search."""
+    if limited := _rate_limited(request):
+        return limited
     if not config.tavily_api_key:
         return JSONResponse({"error": "TAVILY_API_KEY not configured"}, status_code=400)
     from prysma.sources.tavily_search import TavilySource
@@ -250,8 +286,10 @@ class WatchRequest(BaseModel):
 
 
 @app.post("/api/discover")
-def discover(body: DiscoverRequest):
+def discover(request: Request, body: DiscoverRequest):
     """Find candidate competitors for an app, store link, or idea, then profile them."""
+    if limited := _rate_limited(request):
+        return limited
     from prysma.agents.discovery import DiscoveryAgent
 
     agent = DiscoveryAgent()
@@ -297,8 +335,10 @@ def watch(body: WatchRequest):
 
 
 @app.post("/api/gaps")
-def gaps():
+def gaps(request: Request):
     """Run the market gap analysis with Nemotron Ultra and return the report."""
+    if limited := _rate_limited(request):
+        return limited
     from prysma.agents.analyst import AnalystAgent
 
     analyst = AnalystAgent()
@@ -316,7 +356,18 @@ def main():
     args = parser.parse_args()
 
     print(f"🚀 Prysma web dashboard starting on http://{args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    # Traefik fronts this app, so without these every request appears to come
+    # from the proxy's address and the per-IP rate limit becomes one global
+    # bucket. The container port is not published to the host, so only Traefik
+    # can reach the app and trusting X-Forwarded-For is safe here.
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
 
 
 if __name__ == "__main__":
