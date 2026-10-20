@@ -21,9 +21,17 @@ STORED_VALUE_LIMIT = 500  # Database.upsert_app_listing stores old/new values cu
 
 
 def _clean(value) -> str:
-    """Normalise a stored value. None, empty, and the string 'None' all become ''."""
+    """Normalise a stored value. None, empty, and the string 'None' all become ''.
+
+    Scraped JSON can keep \\uXXXX escapes, so a stored '\\u0026' would otherwise
+    differ from a live '&' and raise a phantom change alert. Decode them here.
+    """
     text = '' if value is None else str(value).strip()
-    return '' if text == 'None' else text
+    if text == 'None':
+        return ''
+    if '\\u' in text:
+        text = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), text)
+    return text
 
 
 def _short(text: str, limit: int = 80) -> str:
@@ -149,8 +157,12 @@ class AlertEngine:
             increase = int(new_num - old_num)
             if increase < 500 and increase / old_num < 0.25:
                 return None
+            pct = increase / old_num
+            # A whole-number percent renders a real 0.3% rise as "+0%", which reads
+            # as no change at all. Keep a decimal while the rise is under 10%.
+            pct_text = f"+{pct:.1%}" if pct < 0.1 else f"+{pct:.0%}"
             message = (f"{name}: ratings count rose {int(old_num):,} -> {int(new_num):,} "
-                       f"(+{increase / old_num:.0%})")
+                       f"({pct_text})")
             return 'medium', message + self._complaint_clause(change, hours) + '.'
 
         if change_type == 'description':
