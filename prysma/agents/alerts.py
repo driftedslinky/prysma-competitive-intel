@@ -19,6 +19,17 @@ COMPLAINT_KEYWORDS = CompetitiveIntelAgent.OPPORTUNITY_KEYWORDS
 CHANGE_LABELS = {'ratings_count': 'ratings count', 'release_date': 'release date'}
 STORED_VALUE_LIMIT = 500  # Database.upsert_app_listing stores old/new values cut to this length
 
+# Fragments of the page's JSON-LD payload. An older scraper stored that payload as
+# the description, so correcting it registers as a description change. Repairing
+# corrupt data is not a competitor move, so those must not alert.
+STRUCTURED_DATA_MARKERS = ('"operatingSystem"', '"applicationCategory"', '"aggregateRating"',
+                           '"contentRating"', '"@type"', '\\"')
+
+
+def _looks_like_structured_data(text: str) -> bool:
+    """True when a stored value is a scraped JSON-LD payload rather than real copy."""
+    return any(marker in text for marker in STRUCTURED_DATA_MARKERS)
+
 
 def _clean(value) -> str:
     """Normalise a stored value. None, empty, and the string 'None' all become ''.
@@ -166,6 +177,10 @@ class AlertEngine:
             return 'medium', message + self._complaint_clause(change, hours) + '.'
 
         if change_type == 'description':
+            # Correcting a value the old scraper filled with JSON-LD is a data
+            # repair, not a competitor change. Stay quiet about it.
+            if _looks_like_structured_data(old) or _looks_like_structured_data(new):
+                return None
             # Digit-only differences are counters scraped into the text, not copy changes.
             # Values are stored cut to 500 chars, so a longer number shifts the cut point:
             # compare only the shared length when a value was cut.
