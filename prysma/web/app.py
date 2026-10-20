@@ -72,7 +72,9 @@ async def index():
     aso_changes = db.get_aso_changes(hours=168)
     new_entrants = db.get_new_entrants(hours=720)
     trend_reports = db.get_trend_reports(emerging_only=True)
-    alerts = db.get_recent_alerts(hours=168)
+    # Alerts are low-frequency by design (quiet by default), so a month reads
+    # better than a week: a 7-day window is usually empty even when the tool works.
+    alerts = db.get_recent_alerts(hours=720)
 
     # Pre-render the strategic analysis from the latest digest if available
     strategic_html = ""
