@@ -51,20 +51,24 @@ def run_digest():
     print(f"[{datetime.now()}] Sending daily digest...")
     reporter = ReporterAgent()
     
-    # Send daily digest
-    success = reporter.send_daily_digest("your_numeric_telegram_id_here")
-    if success:
-        print("  ✅ Digest sent to your_numeric_telegram_id_here")
-    else:
-        print("  ❌ Failed to send digest")
-    
-    # Send competitive intel report
-    comp_success = reporter.send_competitive_report("your_numeric_telegram_id_here")
-    if comp_success:
-        print("  ✅ Competitive report sent to your_numeric_telegram_id_here")
-    else:
-        print("  ❌ Failed to send competitive report")
-    
+    # Send to every configured user; the id comes from TELEGRAM_ALLOWED_USERS
+    chat_ids = [uid.strip() for uid in config.telegram_allowed_users.split(",") if uid.strip()]
+    if not chat_ids:
+        print("  ⚠️ TELEGRAM_ALLOWED_USERS is empty - nothing to send to")
+        reporter.close()
+        return
+
+    for chat_id in chat_ids:
+        if reporter.send_daily_digest(chat_id):
+            print(f"  ✅ Digest sent to {chat_id}")
+        else:
+            print(f"  ❌ Failed to send digest to {chat_id}")
+
+        if reporter.send_competitive_report(chat_id):
+            print(f"  ✅ Competitive report sent to {chat_id}")
+        else:
+            print(f"  ❌ Failed to send competitive report to {chat_id}")
+
     reporter.close()
 
 
