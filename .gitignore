@@ -34,3 +34,4 @@ blueprint/
 .claude/
 .pytest_cache/
 IDEA.md
+CLAUDE_TASK_REDESIGN.md
