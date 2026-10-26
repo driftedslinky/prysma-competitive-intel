@@ -33,8 +33,10 @@ WATCH_LISTS = {
     },
     "app-blockers": {
         "label": "App blockers",
-        # IDs checked against the stores. The two names without IDs match
-        # several listings, so discovery has to pick the right one.
+        # Discovery found these on Google Play only, so they carry an android id
+        # and no iOS id. "App Blocker: Screen Time" also exists on the App Store,
+        # but under a different publisher, so it is a different app and is not
+        # linked here.
         "seed": {
             "AppBlock": {"android": "cz.mobilesoft.appblock", "ios": "1515753232"},
             "ScreenZen": {"android": "com.screenzen", "ios": "1541027222"},
@@ -43,8 +45,8 @@ WATCH_LISTS = {
             "Freedom": {"android": "to.freedom.android2", "ios": "1269788228"},
             "Opal": {"android": "com.withopal.opal", "ios": "1497465230"},
             "AppLock": {"android": "com.domobile.applockwatcher"},
-            "Block - App & Site Blocker": {},
-            "App Blocker: Screen Time": {},
+            "Block - App & Site Blocker": {"android": "com.wverlaek.block"},
+            "App Blocker: Screen Time": {"android": "com.avicena.appblocker"},
             "BePresent": {"ios": "1644737181"},
             "Brick": {"ios": "6448794069"},
         },
