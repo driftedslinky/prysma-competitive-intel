@@ -12,39 +12,41 @@ from prysma.config import config
 # Load with `python -m prysma.storage.migrations --seed`. Add others via /watch.
 DEFAULT_COMPETITOR_STORE_IDS = {
     "Interval Timer": {"android": "cc.dreamspark.intervaltimer"},
-    "Tabata Timer": {"android": "com.evgeniysharafan.tabatatimer", "ios": "id1255964203"},
-    "Seconds Interval Timer": {"android": "com.runloop.seconds.free", "ios": "id475816966"},
-    "Intervals Pro": {"ios": "id957586938"},
-    "Box Timer": {"ios": "id1547518531"},
-    "SmartWOD": {"android": "net.smartwod.workouts", "ios": "id1317933303"},
+    "Tabata Timer": {"android": "com.evgeniysharafan.tabatatimer", "ios": "1255964203"},
+    "Seconds Interval Timer": {"android": "com.runloop.seconds.free", "ios": "475816966"},
+    "Intervals Pro": {"ios": "957586938"},
+    "Box Timer": {"ios": "1547518531"},
+    "SmartWOD": {"android": "net.smartwod.workouts", "ios": "1317933303"},
     "Boxing Round Interval Timer": {"android": "kr.co.royzero.boxingtimer"},
-    "PushPress Timer": {"ios": "id1554256831"},
+    "PushPress Timer": {"ios": "1554256831"},
 }
 
 # Two separate markets. Every competitor belongs to one watch list, and the
 # dashboard scopes its counts and tables to the selected list.
+# Store ids are the bare ids: the "id" in an App Store URL is part of the URL,
+# not of the id, and a stored "id1234" is not a number.
 DEFAULT_WATCH_LIST = "interval-timers"
 WATCH_LISTS = {
     "interval-timers": {
         "label": "Interval timers",
-        "seed": {**DEFAULT_COMPETITOR_STORE_IDS, "Gravl": {"ios": "id6450921637"}},
+        "seed": {**DEFAULT_COMPETITOR_STORE_IDS, "Gravl": {"ios": "6450921637"}},
     },
     "app-blockers": {
         "label": "App blockers",
         # IDs checked against the stores. The two names without IDs match
         # several listings, so discovery has to pick the right one.
         "seed": {
-            "AppBlock": {"android": "cz.mobilesoft.appblock", "ios": "id1515753232"},
-            "ScreenZen": {"android": "com.screenzen", "ios": "id1541027222"},
-            "one sec": {"android": "wtf.riedel.onesec", "ios": "id1532875441"},
-            "BlockSite": {"android": "co.blocksite", "ios": "id1474967653"},
-            "Freedom": {"android": "to.freedom.android2", "ios": "id1269788228"},
-            "Opal": {"android": "com.withopal.opal", "ios": "id1497465230"},
+            "AppBlock": {"android": "cz.mobilesoft.appblock", "ios": "1515753232"},
+            "ScreenZen": {"android": "com.screenzen", "ios": "1541027222"},
+            "one sec": {"android": "wtf.riedel.onesec", "ios": "1532875441"},
+            "BlockSite": {"android": "co.blocksite", "ios": "1474967653"},
+            "Freedom": {"android": "to.freedom.android2", "ios": "1269788228"},
+            "Opal": {"android": "com.withopal.opal", "ios": "1497465230"},
             "AppLock": {"android": "com.domobile.applockwatcher"},
             "Block - App & Site Blocker": {},
             "App Blocker: Screen Time": {},
-            "BePresent": {"ios": "id1644737181"},
-            "Brick": {"ios": "id6448794069"},
+            "BePresent": {"ios": "1644737181"},
+            "Brick": {"ios": "6448794069"},
         },
     },
 }
@@ -345,16 +347,28 @@ class Database:
         """Add the seed competitors of every watch list. Returns the count added.
 
         Never touches an existing row, so an unwatched competitor stays unwatched.
+        A seed name is also skipped when a competitor of the same brand is already
+        present, so seeding "Gravl" cannot put a second Gravl beside an existing
+        "Gravl: AI Personal Trainer". Without that check the row came back on the
+        next start, because the seed re-inserts any name it cannot find.
         """
+        from prysma.agents.discovery import normalise_name
+
         added = 0
         with self.get_conn() as conn:
+            brands = {normalise_name(r["name"]) for r in conn.execute("SELECT name FROM competitors")}
             for key, watch_list in WATCH_LISTS.items():
                 for name, store_ids in watch_list["seed"].items():
+                    brand = normalise_name(name)
+                    if brand in brands:
+                        continue
                     cursor = conn.execute(
                         "INSERT OR IGNORE INTO competitors (name, store_ids, watch_list) VALUES (?, ?, ?)",
                         (name, json.dumps(store_ids), key)
                     )
                     added += cursor.rowcount
+                    if cursor.rowcount:
+                        brands.add(brand)
         return added
 
     def get_competitor_by_name(self, name: str) -> Optional[int]:

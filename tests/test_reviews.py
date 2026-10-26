@@ -169,7 +169,9 @@ class TestScanReviews:
     def test_falls_back_to_seed_map_when_column_empty(self, agent, test_db):
         test_db.add_competitor("Tabata Timer")  # in DEFAULT_COMPETITOR_STORE_IDS, no store_ids saved
         competitor = next(c for c in test_db.get_active_competitors() if c["name"] == "Tabata Timer")
-        assert agent._store_ids(competitor)["ios"] == "id1255964203"
+        # A store id is the bare number. The "id" in an App Store URL belongs to
+        # the URL, and storing it made the id non-numeric.
+        assert agent._store_ids(competitor)["ios"] == "1255964203"
 
     def test_negative_reviews_group_into_one_finding_per_competitor(self, agent, test_db):
         test_db.set_competitor_store_ids(test_db.get_competitor_by_name("Rival"),

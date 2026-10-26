@@ -95,6 +95,21 @@ class TestSeeding:
         assert row["description"] == "mine"
 
 
+    def test_seeding_does_not_add_a_second_entry_for_the_same_brand(self, tmp_path):
+        """Seeding must not put "Gravl" beside an existing "Gravl: AI Personal Trainer".
+
+        The seed re-inserts any name it cannot find, so deleting the row alone is
+        undone on the next start. The brand check is what makes it stick.
+        """
+        database = Database(str(tmp_path / "brand.db"))
+        database.add_competitor("Gravl: AI Personal Trainer")
+        for _ in range(2):
+            database.seed_watch_lists()
+            names = [r["name"] for r in database.get_active_competitors()]
+            assert "Gravl" not in names, names
+            assert "Gravl: AI Personal Trainer" in names, names
+
+
 class TestScopedQueries:
     def test_competitors(self, test_db):
         assert _names(test_db.get_active_competitors(watch_list=DEFAULT_WATCH_LIST)) == ["Timer A"]
