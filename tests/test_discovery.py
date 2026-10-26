@@ -63,6 +63,26 @@ class TestMergeAndRank:
         assert normalise_name("AppBlock - Block Apps & Sites") == "appblock"
         assert normalise_name("ScreenZen・Screen Time Control") == "screenzen"
         assert normalise_name("Freedom: App & Website Blocker") == "freedom"
+        # The App Store glues its tagline to the brand with a bare hyphen. This
+        # failed to split, so an iOS entry never matched its Android twin.
+        assert normalise_name("ScreenZen- Screen Time Control") == "screenzen"
+        assert normalise_name("Screen Time- Parental Control") == "screentime"
+        # A hyphen inside a brand name is not a tagline separator.
+        assert normalise_name("Pocket-Casts") == "pocketcasts"
+
+    def test_merged_app_keeps_a_link_per_store(self):
+        """One card must offer both store pages, not only the first one found."""
+        play_url = "https://play.google.com/store/apps/details?id=com.screenzen"
+        ios_url = "https://apps.apple.com/gb/app/id1509617284"
+        play = [{**_cand("ScreenZen・Screen Time Control", package="com.screenzen"),
+                 "store_url": play_url, "links": {"android": play_url}}]
+        ios = [{**_cand("ScreenZen- Screen Time Control", platform="ios", ios_id=1509617284,
+                        source=SOURCE_APP_STORE),
+                "store_url": ios_url, "links": {"ios": ios_url}}]
+        merged = merge_candidates([play, ios])
+        assert len(merged) == 1, "the same app must collapse into one card"
+        assert merged[0]["platforms"] == ["android", "ios"]
+        assert merged[0]["links"] == {"android": play_url, "ios": ios_url}
 
     def test_dedupes_across_stores(self):
         play = [_cand("Freedom: App Blocker", package="to.freedom.android2")]

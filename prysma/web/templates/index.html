@@ -71,6 +71,8 @@
         .badge-sev-high { background: var(--red); color: var(--bg); }
         .badge-sev-medium { background: var(--orange); color: var(--bg); }
         .badge-sev-low { background: var(--muted); color: var(--bg); }
+        .badge-platform { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+        .candidate .stores { font-size: 0.8rem; margin-top: 0.2rem; }
         .actions { padding: 1rem 2rem; display: flex; gap: 1rem; flex-wrap: wrap; }
         .btn {
             background: var(--accent); color: var(--bg); border: none;
@@ -273,6 +275,8 @@
     function safeUrl(u) {
         return /^https:\/\/(play\.google\.com|apps\.apple\.com)\//.test(u || '') ? u : '';
     }
+    // Store keys the discovery API returns, mapped to readable labels.
+    const STORE_LABEL = {android: 'Android', ios: 'iOS'};
     function discoverCompetitors() {
         const q = document.getElementById('discover-query').value.trim();
         if (q.length < 2) return;
@@ -295,17 +299,29 @@
                 }
                 let html = '';
                 discovered.forEach((c, i) => {
-                    const url = safeUrl(c.store_url);
                     const features = (c.features || []).join(' · ');
+                    // The same app can be found on both stores. Merge gives it one
+                    // record, so label every platform it lives on and link each
+                    // store page separately instead of hiding one behind the other.
+                    const links = (c.links && Object.keys(c.links).length)
+                        ? c.links
+                        : (c.store_url ? {[c.platform || 'store']: c.store_url} : {});
+                    const stores = Object.keys(links).filter(s => safeUrl(links[s]));
+                    const platforms = (c.platforms && c.platforms.length) ? c.platforms : stores;
+                    const badges = platforms.map(p =>
+                        '<span class="badge badge-platform">' + esc(STORE_LABEL[p] || p) + '</span>').join(' ');
+                    const storeLinks = stores.map(s =>
+                        '<a href="' + esc(safeUrl(links[s])) + '" target="_blank" rel="noopener">'
+                        + esc(STORE_LABEL[s] || s) + ' store ↗</a>').join(' · ');
                     html += '<div class="card candidate">'
                         + '<input type="checkbox" class="cand-check" data-index="' + i + '">'
                         + '<div>'
                         + '<h3>' + esc(c.name) + '</h3>'
-                        + '<p class="small">' + esc(c.platform) + ' · ' + (c.rating != null ? esc(c.rating) + '★' : 'no rating')
+                        + '<p class="small">' + badges + ' ' + (c.rating != null ? esc(c.rating) + '★' : 'no rating')
                         + ' · ' + esc(c.price || 'price unknown') + '</p>'
                         + '<p class="muted">' + esc(c.summary) + '</p>'
                         + (features ? '<p class="features">' + esc(features) + '</p>' : '')
-                        + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">Store page ↗</a>' : '')
+                        + (storeLinks ? '<p class="stores">' + storeLinks + '</p>' : '')
                         + '</div></div>';
                 });
                 document.getElementById('candidate-grid').innerHTML = html;
