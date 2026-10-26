@@ -237,3 +237,28 @@ class TestDashboard:
     def test_status_route_is_unchanged(self, client):
         body = client.get("/api/status").json()
         assert body["status"] == "ok" and body["competitors"] == 2
+
+
+class TestSeedStoreIds:
+    """Seed store ids must be the bare ids, so a prefixed one cannot come back."""
+
+    def test_ios_ids_are_numeric(self):
+        for key, watch_list in WATCH_LISTS.items():
+            for name, ids in watch_list["seed"].items():
+                ios = ids.get("ios")
+                if ios is not None:
+                    assert str(ios).isdigit(), f"{key}/{name} has a non-numeric ios id: {ios!r}"
+
+    def test_android_ids_look_like_packages(self):
+        import re
+        for key, watch_list in WATCH_LISTS.items():
+            for name, ids in watch_list["seed"].items():
+                pkg = ids.get("android")
+                if pkg is not None:
+                    assert re.fullmatch(r"[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)+", pkg), \
+                        f"{key}/{name} has an odd android id: {pkg!r}"
+
+    def test_the_two_by_name_blockers_have_a_play_package(self):
+        seed = WATCH_LISTS["app-blockers"]["seed"]
+        assert seed["Block - App & Site Blocker"]["android"] == "com.wverlaek.block"
+        assert seed["App Blocker: Screen Time"]["android"] == "com.avicena.appblocker"
