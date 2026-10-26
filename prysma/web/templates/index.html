@@ -1,271 +1,424 @@
 <!DOCTYPE html>
+<!--
+Design notes. Taken from Mobbin screens of seven finance apps: Mercury, Fey,
+Stripe, Kraken, Square, Xero and Shopify Finance.
+
+- Top-level nav. Mercury, Stripe, Kraken and Square put the app sections in a
+  sidebar, and switch views inside a page with a row of underlined text tabs
+  (Stripe "All subscriptions / Test clocks", Mercury "Employee budgets / Team
+  members") or a pill segmented control (Kraken "Balances / Open orders",
+  Mercury "Banking / Books"). Four sections do not need a sidebar, so this page
+  uses underlined tabs for the sections and a segmented control for the
+  watch-list switch, the same split Mercury makes.
+- KPI row. Stripe shows its status counts as a row of equal cards, label on
+  top and a large number below, and each card is a filter you click. Kraken and
+  Snowflake do the same with a muted label, one big tabular number and one
+  line of context. The KPI cards here follow Stripe: clickable, a visible
+  selected/hover border, label first.
+- Background jobs. Mercury and Stripe confirm a finished action with a small
+  dark toast at the bottom centre. AirOps shows a running job as a spinner and
+  a status line inside the panel, and Kraken marks state with a small pill
+  ("Healthy"). The Analysis tab uses all three: a spinner on the tab label, a
+  status line with a spinner in the panel, and a "Ready" pill plus a toast.
+- Type, spacing, colour. All seven use one sans-serif family, a small scale
+  (12/13/14/16/20/28 px), tabular figures for numbers, and an 8 px spacing
+  rhythm. Colour is disciplined: one accent (Mercury indigo, Stripe violet,
+  Kraken purple), green and red only for meaning. Fey and Kraken are dark with
+  near-black surfaces and hairline borders. This page keeps the existing dark
+  palette and blue accent, moves the surfaces closer to Fey, and turns the
+  solid status badges into tinted pills like Stripe "Failed" or Fey "Sale".
+- Dense tables. Fey's insider table, Kraken's market table and Stripe's
+  payments list use no vertical rules, faint row separators, small uppercase
+  muted headers, right-aligned tabular numbers, about 36-40 px rows, and a
+  result count. The tables here do the same.
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prysma — AI Competitive Intelligence</title>
+    <link rel="icon" href="data:,">
     <style>
         :root {
-            --bg: #0d1117;
-            --card: #161b22;
-            --border: #30363d;
+            --bg: #0b0e13;
+            --surface: #12161d;
+            --surface-2: #181d26;
+            --border: #232a35;
+            --border-strong: #303846;
             --text: #e6edf3;
             --muted: #8b949e;
             --accent: #58a6ff;
+            --accent-soft: rgba(88, 166, 255, 0.12);
             --green: #3fb950;
             --orange: #d29922;
             --red: #f85149;
             --purple: #bc8cff;
+            --radius: 10px;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg); color: var(--text); line-height: 1.6;
-            padding: 0; max-width: 1200px; margin: 0 auto;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
+            background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55;
         }
-        header {
-            background: var(--card); border-bottom: 1px solid var(--border);
-            padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center;
-        }
-        header h1 { font-size: 1.5rem; }
-        header .badge-hack {
-            background: var(--purple); color: var(--bg); padding: 4px 12px;
-            border-radius: 12px; font-size: 0.75rem; font-weight: 600;
-        }
-        .stats { display: flex; gap: 1rem; padding: 1.5rem 2rem; }
-        .stat {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; padding: 1rem; flex: 1; text-align: center;
-        }
-        .stat .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
-        .stat .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; }
-        .section { padding: 1rem 2rem; }
-        .section h2 {
-            font-size: 1.2rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border);
-            padding-bottom: 0.5rem;
-        }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-        .card {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; padding: 1rem;
-        }
-        .card h3 { font-size: 1rem; margin-bottom: 0.5rem; }
-        .card .muted { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
-        .card .small { font-size: 0.8rem; color: var(--muted); }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
-        th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
         .muted { color: var(--muted); }
-        .badge {
-            padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600;
+        .small { font-size: 12px; }
+
+        /* Header: brand, watch-list switch, tabs */
+        header { border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 5; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 16px; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .brand h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+        .badge-hack {
+            border: 1px solid rgba(188, 140, 255, 0.4); color: var(--purple);
+            padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
         }
-        .badge-change { background: var(--accent); color: var(--bg); }
-        .badge-news { background: var(--green); color: var(--bg); }
-        .badge-opportunity { background: var(--orange); color: var(--bg); }
-        .badge-pricing_change { background: var(--purple); color: var(--bg); }
-        .badge-product_launch { background: var(--green); color: var(--bg); }
-        .badge-hiring { background: var(--accent); color: var(--bg); }
-        .badge-funding { background: var(--orange); color: var(--bg); }
-        .badge-negative_news { background: var(--red); color: var(--bg); }
-        .badge-content { background: var(--muted); color: var(--bg); }
-        .badge-sev-high { background: var(--red); color: var(--bg); }
-        .badge-sev-medium { background: var(--orange); color: var(--bg); }
-        .badge-sev-low { background: var(--muted); color: var(--bg); }
-        .badge-platform { background: var(--card); border: 1px solid var(--border); color: var(--text); }
-        .candidate .stores { font-size: 0.8rem; margin-top: 0.2rem; }
-        .actions { padding: 1rem 2rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+        .switch { display: flex; align-items: center; gap: 8px; }
+        .segmented { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+        .seg { color: var(--muted); padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: 550; }
+        .seg:hover { color: var(--text); text-decoration: none; }
+        .seg[aria-current] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
+        [role=tablist] { display: flex; gap: 24px; margin-top: 12px; }
+        [role=tab] {
+            display: inline-flex; align-items: center; gap: 8px; padding: 10px 0 12px;
+            color: var(--muted); font-weight: 550; border-bottom: 2px solid transparent;
+        }
+        [role=tab]:hover { color: var(--text); text-decoration: none; }
+        [role=tab][aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+        .tab-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+        .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: none; }
+        [role=tab].has-update .tab-dot { display: inline-block; }
+
+        /* Spinner, shared by the tab label and the panels */
+        .spinner {
+            width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none;
+            border: 2px solid var(--border-strong); border-top-color: var(--accent);
+            animation: spin 0.8s linear infinite;
+        }
+        [role=tab] .spinner { display: none; }
+        [role=tab].busy .spinner { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+        main.wrap { padding-top: 24px; padding-bottom: 40px; }
+        [role=tabpanel] { display: grid; gap: 24px; }
+        [role=tabpanel][hidden] { display: none; }
+
+        /* Blocks: every section has a heading row */
+        .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+        .block-head h2 { font-size: 16px; font-weight: 650; }
+        .block-head .sub { color: var(--muted); font-size: 13px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+
+        /* KPI row */
+        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .kpi { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s, background 0.15s; }
+        .kpi:hover, .kpi:focus-within { border-color: var(--border-strong); background: var(--surface-2); }
+        .kpi-link { color: inherit; display: block; }
+        .kpi-link:hover { text-decoration: none; }
+        .kpi-link::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+        .kpi-link:focus-visible { outline: none; }
+        .kpi-link:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .kpi .label { color: var(--muted); font-size: 13px; }
+        .kpi .figure { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; margin-top: 4px; }
+        .kpi .go { color: var(--muted); font-size: 12px; }
+        .kpi:hover .go { color: var(--accent); }
+        .kpi-action { position: absolute; top: 12px; right: 12px; z-index: 1; }
+
+        /* Controls */
         .btn {
-            background: var(--accent); color: var(--bg); border: none;
-            padding: 0.7rem 1.5rem; border-radius: 6px; font-weight: 600;
-            cursor: pointer; font-size: 0.9rem; text-decoration: none;
-            display: inline-block;
+            background: var(--accent); color: #0b0e13; border: 1px solid transparent;
+            padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px;
+            cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-family: inherit;
         }
-        .btn:hover { opacity: 0.9; }
-        .btn-secondary { background: var(--card); border: 1px solid var(--border); color: var(--text); }
-        .strategic {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 8px; padding: 1.5rem; line-height: 1.8;
+        .btn:hover { filter: brightness(1.08); text-decoration: none; }
+        .btn:disabled { opacity: 0.5; cursor: default; filter: none; }
+        .btn-secondary { background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
+        .btn-link {
+            background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
+            padding: 2px 8px; font-size: 12px; cursor: pointer; font-family: inherit;
         }
-        .search-bar { padding: 1rem 2rem; display: flex; gap: 0.5rem; }
-        .search-bar input {
-            flex: 1; background: var(--card); border: 1px solid var(--border);
-            color: var(--text); padding: 0.6rem 1rem; border-radius: 6px; font-size: 0.9rem;
+        .btn-link:hover { color: var(--text); border-color: var(--border-strong); }
+        .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .field { display: flex; gap: 8px; }
+        .field input {
+            flex: 1; background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
+            padding: 9px 12px; border-radius: 8px; font-size: 14px; font-family: inherit; min-width: 0;
         }
-        #search-results { padding: 0 2rem 1rem; }
-        .search-result {
-            background: var(--card); border: 1px solid var(--border);
-            border-radius: 6px; padding: 0.8rem; margin-bottom: 0.5rem;
+        .field input::placeholder { color: #6e7681; }
+        label.label-text { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+        /* Tables */
+        .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        tbody tr:last-child td { border-bottom: none; }
+        tbody tr:hover td { background: rgba(255, 255, 255, 0.015); }
+        th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+        td { font-size: 13px; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        td.clip { max-width: 220px; overflow-wrap: anywhere; color: var(--muted); }
+        .empty { color: var(--muted); padding: 16px; }
+
+        /* Badges: tinted, not solid */
+        .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
+                 background: rgba(139, 148, 158, 0.15); color: var(--muted); }
+        .badge-change, .badge-hiring { background: rgba(88, 166, 255, 0.14); color: var(--accent); }
+        .badge-news, .badge-product_launch { background: rgba(63, 185, 80, 0.14); color: var(--green); }
+        .badge-opportunity, .badge-funding { background: rgba(210, 153, 34, 0.16); color: var(--orange); }
+        .badge-pricing_change { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+        .badge-negative_news { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+        .badge-sev-high { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+        .badge-sev-medium { background: rgba(210, 153, 34, 0.16); color: var(--orange); }
+        .badge-sev-low { background: rgba(139, 148, 158, 0.15); color: var(--muted); }
+        .badge-platform { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+        .pill-ready { background: rgba(63, 185, 80, 0.14); color: var(--green); }
+        .pill-error { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+
+        /* Competitor cards and discovery candidates */
+        .comp { display: flex; flex-direction: column; gap: 6px; }
+        .comp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .card h3 { font-size: 14px; font-weight: 650; }
+        .card .muted { font-size: 13px; }
+        .stores { font-size: 12px; margin-top: auto; }
+        #discover-status { margin-top: 12px; font-size: 13px; }
+        #discover-results { display: none; margin-top: 16px; }
+        .candidate { display: flex; gap: 12px; align-items: flex-start; }
+        .candidate input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+        .candidate .features { font-size: 12px; color: var(--muted); }
+        .watch-bar { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+        .search-result { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .search-result:last-child { border-bottom: none; }
+        .search-result a { font-weight: 600; }
+        .search-result p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+        #search-results:empty { display: none; }
+        #search-results { margin-top: 12px; }
+
+        /* Analysis */
+        .analysis { display: grid; gap: 24px; }
+        .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-height: 22px; }
+        .report { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; line-height: 1.75; margin-top: 12px; overflow-wrap: anywhere; }
+
+        /* Toast */
+        #toast {
+            position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+            background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px;
+            padding: 10px 16px; font-size: 13px; display: none; gap: 12px; align-items: center;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); z-index: 10; max-width: calc(100% - 32px);
         }
-        .search-result a { color: var(--accent); text-decoration: none; font-weight: 600; }
-        .search-result p { font-size: 0.85rem; color: var(--muted); margin-top: 0.3rem; }
-        .market-entry { padding: 1.5rem 2rem 0.5rem; }
-        .market-entry h2 { font-size: 1.4rem; margin-bottom: 0.8rem; }
-        .market-entry .search-bar { padding: 0; }
-        .market-entry .search-bar input { font-size: 1rem; padding: 0.8rem 1rem; }
-        #discover-status { margin-top: 0.8rem; }
-        #discover-results { display: none; margin-top: 1rem; }
-        .candidate { display: flex; gap: 0.8rem; align-items: flex-start; }
-        .candidate input[type=checkbox] { margin-top: 0.35rem; width: 1rem; height: 1rem; accent-color: var(--accent); }
-        .candidate a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
-        .candidate .features { font-size: 0.8rem; color: var(--muted); }
-        .watch-bar { margin-top: 1rem; display: flex; gap: 1rem; align-items: center; }
-        #gaps-section { display: none; }
-        footer { padding: 2rem; text-align: center; color: var(--muted); font-size: 0.8rem; }
-        .tech-badge {
-            display: inline-block; background: var(--card); border: 1px solid var(--border);
-            padding: 2px 10px; border-radius: 12px; font-size: 0.7rem; margin: 2px;
+        #toast.show { display: flex; }
+
+        footer { border-top: 1px solid var(--border); padding: 24px 0 32px; color: var(--muted); font-size: 12px; }
+        footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .tech-badge { display: inline-block; border: 1px solid var(--border); padding: 1px 8px; border-radius: 999px; margin: 2px 2px 2px 0; }
+
+        @media (max-width: 760px) {
+            .wrap { padding: 0 16px; }
+            .kpis { grid-template-columns: repeat(2, 1fr); }
+            [role=tablist] { gap: 16px; overflow-x: auto; }
         }
     </style>
 </head>
 <body>
     <header>
-        <h1>🔍 Prysma</h1>
-        <span class="badge-hack">Nebius x NVIDIA Hackathon 2026</span>
-    </header>
-
-    <div class="market-entry">
-        <h2>Find your market</h2>
-        <div class="search-bar">
-            <input type="text" id="discover-query" placeholder="Enter your app, a store link, or describe an app idea..." onkeydown="if(event.key==='Enter')discoverCompetitors()">
-            <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
-        </div>
-        <div id="discover-status" class="muted"></div>
-        <div id="discover-results">
-            <div class="grid" id="candidate-grid"></div>
-            <div class="watch-bar">
-                <button class="btn" id="watch-btn" onclick="watchSelected()">Watch selected</button>
-                <span id="watch-status" class="muted"></span>
+        <div class="wrap">
+            <div class="topbar">
+                <div class="brand">
+                    <h1>Prysma</h1>
+                    <span class="badge-hack">Nebius x NVIDIA Hackathon 2026</span>
+                </div>
+                <div class="switch">
+                    <span class="muted small" id="switch-label">Watch list</span>
+                    <nav class="segmented" aria-labelledby="switch-label">{list_options}</nav>
+                </div>
+            </div>
+            <div role="tablist" aria-label="Dashboard sections" id="tabs">
+                <a role="tab" id="tab-overview" href="#overview" aria-controls="panel-overview" aria-selected="true">Overview</a>
+                <a role="tab" id="tab-competitors" href="#competitors" aria-controls="panel-competitors" aria-selected="false" tabindex="-1">Competitors <span class="tab-count">{competitors_count}</span></a>
+                <a role="tab" id="tab-insights" href="#insights" aria-controls="panel-insights" aria-selected="false" tabindex="-1">Insights</a>
+                <a role="tab" id="tab-analysis" href="#analysis" aria-controls="panel-analysis" aria-selected="false" tabindex="-1">Analysis <span class="spinner" aria-hidden="true"></span><span class="tab-dot" aria-hidden="true"></span></a>
             </div>
         </div>
-    </div>
+    </header>
 
-    <div class="stats">
-        <div class="stat"><div class="num">{competitors_count}</div><div class="label">Competitors</div></div>
-        <div class="stat"><div class="num">{findings_count}</div><div class="label">Findings (7d)</div></div>
-        <div class="stat"><div class="num">{aso_count}</div><div class="label">ASO Changes</div></div>
-        <div class="stat"><div class="num">{alerts_count}</div><div class="label">Alerts (30d)</div></div>
-    </div>
+    <main class="wrap">
+        <!-- Overview -->
+        <section role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+            <section aria-labelledby="h-summary">
+                <div class="block-head">
+                    <h2 id="h-summary">Summary · {watch_list_label}</h2>
+                    <span class="sub">Select a card to open its list</span>
+                </div>
+                <div class="kpis">
+                    <div class="kpi">
+                        <a class="kpi-link" href="#competitors"><div class="label">Competitors</div><div class="figure">{competitors_count}</div><div class="go">Watched now →</div></a>
+                        <button type="button" class="btn-link kpi-action" data-action="add-competitors">Add</button>
+                    </div>
+                    <div class="kpi">
+                        <a class="kpi-link" href="#insights"><div class="label">Findings ({findings_window})</div><div class="figure">{findings_count}</div><div class="go">View findings →</div></a>
+                    </div>
+                    <div class="kpi">
+                        <a class="kpi-link" href="#competitors"><div class="label">ASO changes ({aso_window})</div><div class="figure">{aso_count}</div><div class="go">View changes →</div></a>
+                    </div>
+                    <div class="kpi">
+                        <a class="kpi-link" href="#insights"><div class="label">Alerts ({alerts_window})</div><div class="figure">{alerts_count}</div><div class="go">View alerts →</div></a>
+                        <button type="button" class="btn-link kpi-action" data-action="rebuild-alerts">Rebuild</button>
+                    </div>
+                </div>
+            </section>
 
-    <div class="actions">
-        <a href="/api/scan" class="btn" onclick="triggerScan(event)">▶ Run Scan</a>
-        <a href="/api/analyze" class="btn btn-secondary" onclick="triggerAnalyze(event)">🧠 Strategic Analysis (Ultra)</a>
-        <button class="btn btn-secondary" id="gaps-btn" onclick="findGaps()">🕳 Find market gaps</button>
-        <a href="/scan" class="btn btn-secondary">📋 Scan Details</a>
-    </div>
+            <section class="card" aria-labelledby="h-market">
+                <div class="block-head">
+                    <h2 id="h-market">Find your market</h2>
+                    <span class="sub">Apps you watch join the {watch_list_label} list</span>
+                </div>
+                <label class="label-text" for="discover-query">Your app, a store link, or an app idea</label>
+                <div class="field">
+                    <input type="text" id="discover-query" placeholder="e.g. a HIIT timer with voice cues" onkeydown="if(event.key==='Enter')discoverCompetitors()">
+                    <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
+                </div>
+                <div id="discover-status" class="muted" role="status"></div>
+                <div id="discover-results">
+                    <div class="grid" id="candidate-grid"></div>
+                    <div class="watch-bar">
+                        <button class="btn" id="watch-btn" onclick="watchSelected()">Watch selected</button>
+                        <span id="watch-status" class="muted"></span>
+                    </div>
+                </div>
+            </section>
 
-    <div class="section" id="gaps-section">
-        <h2>Market Gaps (Nemotron Ultra)</h2>
-        <div class="strategic" id="gaps-report"></div>
-    </div>
+            <section aria-labelledby="h-actions">
+                <div class="block-head"><h2 id="h-actions">Actions</h2></div>
+                <div class="row">
+                    <button class="btn" onclick="triggerScan()">▶ Run scan</button>
+                    <button class="btn btn-secondary" data-start="analyze">🧠 Run strategic analysis</button>
+                    <button class="btn btn-secondary" data-start="gaps">🕳 Find market gaps</button>
+                    <a href="/scan" class="btn btn-secondary">📋 Scan details</a>
+                </div>
+            </section>
 
-    <div class="search-bar">
-        <input type="text" id="tavily-query" placeholder="Search competitor news via Tavily..." onkeydown="if(event.key==='Enter')tavilySearch()">
-        <button class="btn" onclick="tavilySearch()">Search</button>
-    </div>
-    <div id="search-results"></div>
+            <section class="card" aria-labelledby="h-news">
+                <div class="block-head">
+                    <h2 id="h-news">Competitor news search</h2>
+                    <span class="sub">Web search via Tavily</span>
+                </div>
+                <label class="label-text" for="tavily-query">Search query</label>
+                <div class="field">
+                    <input type="text" id="tavily-query" placeholder="e.g. Opal screen time funding" onkeydown="if(event.key==='Enter')tavilySearch()">
+                    <button class="btn" onclick="tavilySearch()">Search</button>
+                </div>
+                <div id="search-results"></div>
+            </section>
+        </section>
 
-    <div class="section">
-        <h2>Alerts</h2>
-        <table>
-            <thead><tr><th>Severity</th><th>Competitor</th><th>What changed</th><th>When (UTC)</th></tr></thead>
-            <tbody>{alert_rows}</tbody>
-        </table>
-    </div>
+        <!-- Competitors -->
+        <section role="tabpanel" id="panel-competitors" aria-labelledby="tab-competitors" hidden>
+            <section aria-labelledby="h-comps">
+                <div class="block-head">
+                    <h2 id="h-comps">Watched competitors · {watch_list_label} <span class="muted">({competitors_count})</span></h2>
+                    <button type="button" class="btn btn-secondary" data-action="add-competitors">+ Add competitors</button>
+                </div>
+                <div class="grid">{comp_cards}</div>
+            </section>
 
-    <div class="section">
-        <h2>Competitors</h2>
-        <div class="grid">{comp_cards}</div>
-    </div>
+            <section aria-labelledby="h-aso">
+                <div class="block-head">
+                    <h2 id="h-aso">ASO changes ({aso_window}) <span class="muted">({aso_count})</span></h2>
+                    <span class="sub">Store listing edits by the competitors above</span>
+                </div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Competitor</th><th>Platform</th><th>Change</th><th>Old</th><th>New</th><th class="num">When (UTC)</th></tr></thead>
+                    <tbody>{aso_rows}</tbody>
+                </table></div>
+            </section>
 
-    <div class="section">
-        <h2>Recent Findings</h2>
-        <table>
-            <thead><tr><th>Competitor</th><th>Type</th><th>Title</th><th>Importance</th><th>When</th></tr></thead>
-            <tbody>{findings_rows}</tbody>
-        </table>
-    </div>
+            <section aria-labelledby="h-entrants">
+                <div class="block-head">
+                    <h2 id="h-entrants">New entrants ({entrants_window})</h2>
+                    <span class="sub">All markets: from the new-entrant keyword search, not from one watch list</span>
+                </div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>App</th><th>Platform</th><th>Developer</th><th>Keyword</th></tr></thead>
+                    <tbody>{entrant_rows}</tbody>
+                </table></div>
+            </section>
+        </section>
 
-    <div class="section">
-        <h2>Strategic Analysis (Nemotron Ultra)</h2>
-        <div class="strategic">{strategic_html}</div>
-    </div>
+        <!-- Insights -->
+        <section role="tabpanel" id="panel-insights" aria-labelledby="tab-insights" hidden>
+            <section aria-labelledby="h-alerts">
+                <div class="block-head">
+                    <h2 id="h-alerts">Alerts ({alerts_window}) <span class="muted">({alerts_count})</span></h2>
+                    <button type="button" class="btn btn-secondary" data-action="rebuild-alerts">Rebuild alerts</button>
+                </div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Severity</th><th>Competitor</th><th>What changed</th><th class="num">When (UTC)</th><th class="num"><span class="muted">Action</span></th></tr></thead>
+                    <tbody>{alert_rows}</tbody>
+                </table></div>
+            </section>
 
-    <div class="section">
-        <h2>ASO Changes Detected</h2>
-        <table>
-            <thead><tr><th>Competitor</th><th>Platform</th><th>Change Type</th><th>Old</th><th>New</th></tr></thead>
-            <tbody>{aso_rows}</tbody>
-        </table>
-    </div>
+            <section aria-labelledby="h-findings">
+                <div class="block-head">
+                    <h2 id="h-findings">Findings ({findings_window}) <span class="muted">({findings_count})</span></h2>
+                    <span class="sub">Most important first</span>
+                </div>
+                <div class="table-wrap"><table>
+                    <thead><tr><th>Competitor</th><th>Type</th><th>Title</th><th class="num">Importance</th><th class="num">When (UTC)</th></tr></thead>
+                    <tbody>{findings_rows}</tbody>
+                </table></div>
+            </section>
 
-    <div class="section">
-        <h2>New Entrants</h2>
-        <table>
-            <thead><tr><th>App</th><th>Platform</th><th>Developer</th><th>Category</th></tr></thead>
-            <tbody>{entrant_rows}</tbody>
-        </table>
-    </div>
+            {trends_section}
+        </section>
 
-    <div class="section">
-        <h2>Emerging Trends</h2>
-        <table>
-            <thead><tr><th>Trend</th><th>Strength</th><th>Status</th></tr></thead>
-            <tbody>{trend_rows}</tbody>
-        </table>
-    </div>
+        <!-- Analysis -->
+        <section role="tabpanel" id="panel-analysis" aria-labelledby="tab-analysis" hidden>
+            <section aria-labelledby="h-strategic">
+                <div class="block-head">
+                    <h2 id="h-strategic">Strategic analysis · {watch_list_label}</h2>
+                    <button type="button" class="btn" data-start="analyze">🧠 Run strategic analysis</button>
+                </div>
+                <div class="status-line" id="analyze-status" role="status" aria-live="polite"></div>
+                <div class="report" id="analyze-report">{strategic_html}</div>
+            </section>
 
-    <div class="section">
-        <h2>Powered By</h2>
-        <p>
-            <span class="tech-badge">Nebius Token Factory</span>
-            <span class="tech-badge">NVIDIA Nemotron-3 Nano (30B)</span>
-            <span class="tech-badge">NVIDIA Nemotron-3 Super (120B)</span>
-            <span class="tech-badge">NVIDIA Nemotron-3 Ultra (550B)</span>
-            <span class="tech-badge">Tavily Search API</span>
-            <span class="tech-badge">Telegram Bot API</span>
-        </p>
-    </div>
+            <section aria-labelledby="h-gaps">
+                <div class="block-head">
+                    <h2 id="h-gaps">Market gaps · {watch_list_label}</h2>
+                    <button type="button" class="btn btn-secondary" data-start="gaps">🕳 Find market gaps</button>
+                </div>
+                <div class="status-line" id="gaps-status" role="status" aria-live="polite"></div>
+                <div class="report" id="gaps-report">{gaps_html}</div>
+            </section>
+        </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
 
     <footer>
-        Prysma · AI-Powered Competitive Intelligence · <a href="https://github.com/driftedslinky/prysma-competitive-intel" style="color:var(--accent)">GitHub</a> · Updated {last_updated}
+        <div class="wrap">
+            <div>
+                Powered by
+                <span class="tech-badge">Nebius Token Factory</span>
+                <span class="tech-badge">NVIDIA Nemotron-3 Nano (30B)</span>
+                <span class="tech-badge">NVIDIA Nemotron-3 Super (120B)</span>
+                <span class="tech-badge">NVIDIA Nemotron-3 Ultra (550B)</span>
+                <span class="tech-badge">Tavily Search API</span>
+                <span class="tech-badge">Telegram Bot API</span>
+            </div>
+            <div>Prysma · AI-Powered Competitive Intelligence · <a href="https://github.com/driftedslinky/prysma-competitive-intel">GitHub</a> · Updated {last_updated}</div>
+        </div>
     </footer>
 
     <script>
-    function triggerScan(e) {
-        e.preventDefault();
-        fetch('/api/scan', {method: 'POST'})
-            .then(r => r.json())
-            .then(d => alert(d.message || 'Scan started'))
-            .catch(() => alert('Scan failed to start'));
-    }
-    function triggerAnalyze(e) {
-        e.preventDefault();
-        fetch('/api/analyze', {method: 'POST'})
-            .then(r => r.json())
-            .then(d => alert(d.message + ' Refresh this page in 2-3 minutes.'))
-            .catch(() => alert('Analysis failed to start'));
-    }
-    function tavilySearch() {
-        const q = document.getElementById('tavily-query').value;
-        if (!q) return;
-        document.getElementById('search-results').innerHTML = '<p class="muted">Searching...</p>';
-        fetch('/api/tavily?query=' + encodeURIComponent(q))
-            .then(r => r.json())
-            .then(data => {
-                if (!data.results || !data.results.length) {
-                    document.getElementById('search-results').innerHTML = '<p class="muted">No results.</p>';
-                    return;
-                }
-                let html = '';
-                for (const r of data.results) {
-                    html += '<div class="search-result"><a href="' + r.url + '" target="_blank">' + r.title + '</a><p>' + (r.content || '').substring(0, 200) + '</p></div>';
-                }
-                document.getElementById('search-results').innerHTML = html;
-            })
-            .catch(() => document.getElementById('search-results').innerHTML = '<p class="muted">Search failed.</p>');
-    }
-
-    let discovered = [];
+    // The server picks the list from a fixed set of keys, so this value is safe.
+    const WATCH_LIST = '{watch_list}';
+    const TABS = ['overview', 'competitors', 'insights', 'analysis'];
+    const KIND_LABEL = {analyze: 'Strategic analysis', gaps: 'Market gap analysis'};
 
     function esc(s) {
         const div = document.createElement('div');
@@ -275,6 +428,152 @@
     function safeUrl(u) {
         return /^https:\/\/(play\.google\.com|apps\.apple\.com)\//.test(u || '') ? u : '';
     }
+    function safeHttp(u) {
+        return /^https?:\/\//i.test(u || '') ? u : '';
+    }
+    function reportHtml(text) {
+        return esc(text).replace(/\n/g, '<br>');
+    }
+
+    // --- Toast -----------------------------------------------------------
+    let toastTimer = null;
+    function toast(message, linkTab) {
+        const el = document.getElementById('toast');
+        el.innerHTML = esc(message) + (linkTab ? ' <a href="#' + linkTab + '">View</a>' : '');
+        el.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove('show'), 8000);
+    }
+
+    // --- Tabs ------------------------------------------------------------
+    // The hash is the tab, so a link to #analysis works, reload keeps the tab,
+    // and the back button walks back through the tabs.
+    function tabFromHash() {
+        const t = location.hash.slice(1);
+        return TABS.includes(t) ? t : 'overview';
+    }
+    function showTab(tab) {
+        for (const t of TABS) {
+            const on = t === tab;
+            const btn = document.getElementById('tab-' + t);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            btn.tabIndex = on ? 0 : -1;
+            document.getElementById('panel-' + t).hidden = !on;
+        }
+        if (tab === 'analysis') document.getElementById('tab-analysis').classList.remove('has-update');
+        // Keep the tab when the user switches watch list
+        for (const a of document.querySelectorAll('.seg')) {
+            a.href = '?list=' + a.dataset.list + '#' + tab;
+        }
+    }
+    function goTab(tab, focusTab) {
+        if (location.hash !== '#' + tab) location.hash = tab;
+        else showTab(tab);
+        if (focusTab) document.getElementById('tab-' + tab).focus();
+    }
+    (function initTabs() {
+        // ?tab=analysis is accepted too, then rewritten to the hash form
+        const params = new URLSearchParams(location.search);
+        const asked = params.get('tab');
+        if (asked && TABS.includes(asked)) {
+            params.delete('tab');
+            const q = params.toString();
+            history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + '#' + asked);
+        }
+        showTab(tabFromHash());
+        window.addEventListener('hashchange', () => showTab(tabFromHash()));
+        document.getElementById('tabs').addEventListener('keydown', e => {
+            const i = TABS.indexOf(tabFromHash());
+            let next = null;
+            if (e.key === 'ArrowRight') next = TABS[(i + 1) % TABS.length];
+            else if (e.key === 'ArrowLeft') next = TABS[(i - 1 + TABS.length) % TABS.length];
+            else if (e.key === 'Home') next = TABS[0];
+            else if (e.key === 'End') next = TABS[TABS.length - 1];
+            else if (e.key === ' ') next = e.target.id.replace('tab-', '');
+            if (!next) return;
+            e.preventDefault();
+            goTab(next, true);
+        });
+    })();
+
+    // --- Card and table actions ------------------------------------------
+    document.addEventListener('click', e => {
+        const el = e.target.closest('[data-action], [data-start], [data-unwatch], [data-dismiss]');
+        if (!el) return;
+        if (el.dataset.action === 'add-competitors') {
+            goTab('overview');
+            const input = document.getElementById('discover-query');
+            input.scrollIntoView({block: 'center'});
+            input.focus();
+        } else if (el.dataset.action === 'rebuild-alerts') {
+            rebuildAlerts(el);
+        } else if (el.dataset.start) {
+            startJob(el.dataset.start);
+        } else if (el.dataset.unwatch) {
+            unwatch(el, el.dataset.unwatch);
+        } else if (el.dataset.dismiss) {
+            dismissAlert(el, el.dataset.dismiss);
+        }
+    });
+    function postJson(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: body ? JSON.stringify(body) : undefined
+        }).then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || r.status), () => Promise.reject(r.status)));
+    }
+    function unwatch(btn, name) {
+        if (!confirm('Stop watching ' + name + '? Its history stays, and you can watch it again later.')) return;
+        btn.disabled = true;
+        postJson('/api/unwatch', {name: name})
+            .then(() => location.reload())
+            .catch(() => { btn.disabled = false; toast('Could not unwatch ' + name + '.'); });
+    }
+    function dismissAlert(btn, id) {
+        btn.disabled = true;
+        postJson('/api/alerts/' + encodeURIComponent(id) + '/dismiss')
+            .then(() => location.reload())
+            .catch(() => { btn.disabled = false; toast('Could not dismiss the alert.'); });
+    }
+    function rebuildAlerts(btn) {
+        btn.disabled = true;
+        toast('Rebuilding alerts from the last 24 hours of changes...');
+        postJson('/api/alerts/run')
+            .then(d => { toast('Alerts rebuilt: ' + d.built + ' new.'); setTimeout(() => location.reload(), 1200); })
+            .catch(err => { btn.disabled = false; toast(typeof err === 'string' ? err : 'Alert rebuild failed.'); });
+    }
+    function triggerScan() {
+        postJson('/api/scan')
+            .then(d => toast(d.message || 'Scan started'))
+            .catch(err => toast(typeof err === 'string' ? err : 'Scan failed to start'));
+    }
+
+    // --- Tavily news search ----------------------------------------------
+    function tavilySearch() {
+        const q = document.getElementById('tavily-query').value.trim();
+        const out = document.getElementById('search-results');
+        if (q.length < 2) return;
+        out.innerHTML = '<p class="muted">Searching...</p>';
+        fetch('/api/tavily?query=' + encodeURIComponent(q))
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { out.innerHTML = '<p class="muted">' + esc(data.error) + '</p>'; return; }
+                if (!data.results || !data.results.length) { out.innerHTML = '<p class="muted">No results.</p>'; return; }
+                let html = '<div class="table-wrap">';
+                for (const r of data.results) {
+                    const url = safeHttp(r.url);
+                    const title = esc(r.title || r.url || 'Untitled');
+                    html += '<div class="search-result">'
+                        + (url ? '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + title + '</a>' : '<strong>' + title + '</strong>')
+                        + '<p>' + esc((r.content || '').substring(0, 200)) + '</p></div>';
+                }
+                out.innerHTML = html + '</div>';
+            })
+            .catch(() => out.innerHTML = '<p class="muted">Search failed.</p>');
+    }
+
+    // --- Discovery -------------------------------------------------------
+    let discovered = [];
     // Store keys the discovery API returns, mapped to readable labels.
     const STORE_LABEL = {android: 'Android', ios: 'iOS'};
     function discoverCompetitors() {
@@ -282,15 +581,10 @@
         if (q.length < 2) return;
         const status = document.getElementById('discover-status');
         const btn = document.getElementById('discover-btn');
-        status.textContent = 'Searching the stores and profiling competitors. This can take up to a minute...';
+        status.innerHTML = '<span class="spinner"></span> Searching the stores and profiling competitors. This can take up to a minute...';
         btn.disabled = true;
         document.getElementById('discover-results').style.display = 'none';
-        fetch('/api/discover', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({query: q})
-        })
-            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        postJson('/api/discover', {query: q})
             .then(data => {
                 discovered = data.candidates || [];
                 if (!discovered.length) {
@@ -313,7 +607,7 @@
                     const storeLinks = stores.map(s =>
                         '<a href="' + esc(safeUrl(links[s])) + '" target="_blank" rel="noopener">'
                         + esc(STORE_LABEL[s] || s) + ' store ↗</a>').join(' · ');
-                    html += '<div class="card candidate">'
+                    html += '<label class="card candidate">'
                         + '<input type="checkbox" class="cand-check" data-index="' + i + '">'
                         + '<div>'
                         + '<h3>' + esc(c.name) + '</h3>'
@@ -322,7 +616,7 @@
                         + '<p class="muted">' + esc(c.summary) + '</p>'
                         + (features ? '<p class="features">' + esc(features) + '</p>' : '')
                         + (storeLinks ? '<p class="stores">' + storeLinks + '</p>' : '')
-                        + '</div></div>';
+                        + '</div></label>';
                 });
                 document.getElementById('candidate-grid').innerHTML = html;
                 document.getElementById('discover-results').style.display = 'block';
@@ -339,31 +633,98 @@
             status.textContent = 'Select at least one app.';
             return;
         }
-        fetch('/api/watch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({candidates: picked})
-        })
-            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+        postJson('/api/watch', {candidates: picked, watch_list: WATCH_LIST})
             .then(d => {
-                alert('Now watching ' + d.added + ' competitor(s).');
-                location.reload();
+                toast('Now watching ' + d.added + ' competitor(s).');
+                location.hash = 'competitors';
+                setTimeout(() => location.reload(), 800);
             })
             .catch(() => status.textContent = 'Could not save the selection.');
     }
-    function findGaps() {
-        const section = document.getElementById('gaps-section');
-        const report = document.getElementById('gaps-report');
-        const btn = document.getElementById('gaps-btn');
-        section.style.display = 'block';
-        report.innerHTML = '<p class="muted">Analyzing market gaps with Nemotron Ultra. This can take 2-3 minutes...</p>';
-        btn.disabled = true;
-        fetch('/api/gaps', {method: 'POST'})
-            .then(r => r.ok ? r.json() : Promise.reject(r.status))
-            .then(d => report.innerHTML = esc(d.report).replace(/\n/g, '<br>'))
-            .catch(() => report.innerHTML = '<p class="muted">Gap analysis failed.</p>')
-            .finally(() => btn.disabled = false);
+
+    // --- Analysis runs ---------------------------------------------------
+    // The server tracks each run, so a run survives a tab switch and a reload.
+    // The page polls /api/analysis while a run is going and never blocks on it.
+    const lastState = {analyze: null, gaps: null};
+    let gapsInFlight = false;   // POST /api/gaps holds its request open until the report is done
+    let pollTimer = null;
+
+    function minutes(sec) {
+        const m = Math.floor(sec / 60), s = sec % 60;
+        return m ? m + ' min ' + s + ' s' : s + ' s';
     }
+    function renderJob(kind, job) {
+        const status = document.getElementById(kind + '-status');
+        const report = document.getElementById(kind + '-report');
+        const running = job.state === 'running';
+        for (const b of document.querySelectorAll('[data-start="' + kind + '"]')) b.disabled = running;
+        if (running) {
+            status.innerHTML = '<span class="spinner" aria-hidden="true"></span> Running with Nemotron Ultra'
+                + (job.elapsed_seconds != null ? ' · ' + esc(minutes(job.elapsed_seconds)) + ' elapsed' : '')
+                + ' · usually 2-3 minutes. You can switch tabs; the run continues.';
+        } else if (job.state === 'error') {
+            status.innerHTML = '<span class="badge pill-error">Failed</span> ' + esc(job.message || 'No result.');
+        } else if (job.report) {
+            status.innerHTML = (job.state === 'done' ? '<span class="badge pill-ready">Ready</span> ' : '')
+                + 'Generated ' + esc(String(job.report.created_at).slice(0, 16)) + ' UTC';
+        } else {
+            status.textContent = 'Not run yet for this watch list.';
+        }
+        if (job.report) report.innerHTML = reportHtml(job.report.content);
+        else if (!running) report.innerHTML = '<p class="muted">No ' + esc(KIND_LABEL[kind].toLowerCase())
+            + ' yet. Select <strong>' + (kind === 'analyze' ? 'Run strategic analysis' : 'Find market gaps') + '</strong> above.</p>';
+        report.hidden = running && !job.report;
+    }
+    function renderAnalysis(d) {
+        let busy = false;
+        for (const kind of ['analyze', 'gaps']) {
+            const job = d[kind];
+            // An older finished run can show before the new gap run registers
+            if (kind === 'gaps' && gapsInFlight && job.state !== 'running') {
+                job.state = 'running';
+                delete job.elapsed_seconds;
+            }
+            renderJob(kind, job);
+            if (job.state === 'running') busy = true;
+            if (lastState[kind] === 'running' && job.state === 'done') {
+                if (tabFromHash() !== 'analysis') document.getElementById('tab-analysis').classList.add('has-update');
+                toast(KIND_LABEL[kind] + ' finished. The result is ready.', 'analysis');
+            } else if (lastState[kind] === 'running' && job.state === 'error') {
+                toast(KIND_LABEL[kind] + ' failed.', 'analysis');
+            }
+            lastState[kind] = job.state;
+        }
+        const tab = document.getElementById('tab-analysis');
+        tab.classList.toggle('busy', busy);
+        tab.setAttribute('aria-label', busy ? 'Analysis, running' : 'Analysis');
+        clearTimeout(pollTimer);
+        if (busy) pollTimer = setTimeout(refreshAnalysis, 5000);
+    }
+    function refreshAnalysis() {
+        return fetch('/api/analysis?list=' + encodeURIComponent(WATCH_LIST))
+            .then(r => r.json())
+            .then(renderAnalysis)
+            .catch(() => { clearTimeout(pollTimer); pollTimer = setTimeout(refreshAnalysis, 15000); });
+    }
+    function startJob(kind) {
+        lastState[kind] = 'running';
+        const url = (kind === 'analyze' ? '/api/analyze' : '/api/gaps') + '?list=' + encodeURIComponent(WATCH_LIST);
+        renderJob(kind, {state: 'running'});
+        document.getElementById('tab-analysis').classList.add('busy');
+        toast(KIND_LABEL[kind] + ' started. Track it on the Analysis tab.', 'analysis');
+        if (kind === 'gaps') {
+            gapsInFlight = true;
+            postJson(url)
+                .catch(err => { lastState.gaps = null; toast(typeof err === 'string' ? err : 'Gap analysis failed.'); })
+                .finally(() => { gapsInFlight = false; refreshAnalysis(); });
+            setTimeout(refreshAnalysis, 1500);
+        } else {
+            postJson(url)
+                .then(() => refreshAnalysis())
+                .catch(err => { lastState[kind] = null; toast(typeof err === 'string' ? err : 'Analysis failed to start.'); refreshAnalysis(); });
+        }
+    }
+    refreshAnalysis();
     </script>
 </body>
 </html>

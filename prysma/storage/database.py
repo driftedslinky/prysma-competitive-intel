@@ -21,6 +21,34 @@ DEFAULT_COMPETITOR_STORE_IDS = {
     "PushPress Timer": {"ios": "id1554256831"},
 }
 
+# Two separate markets. Every competitor belongs to one watch list, and the
+# dashboard scopes its counts and tables to the selected list.
+DEFAULT_WATCH_LIST = "interval-timers"
+WATCH_LISTS = {
+    "interval-timers": {
+        "label": "Interval timers",
+        "seed": {**DEFAULT_COMPETITOR_STORE_IDS, "Gravl": {"ios": "id6450921637"}},
+    },
+    "app-blockers": {
+        "label": "App blockers",
+        # IDs checked against the stores. The two names without IDs match
+        # several listings, so discovery has to pick the right one.
+        "seed": {
+            "AppBlock": {"android": "cz.mobilesoft.appblock", "ios": "id1515753232"},
+            "ScreenZen": {"android": "com.screenzen", "ios": "id1541027222"},
+            "one sec": {"android": "wtf.riedel.onesec", "ios": "id1532875441"},
+            "BlockSite": {"android": "co.blocksite", "ios": "id1474967653"},
+            "Freedom": {"android": "to.freedom.android2", "ios": "id1269788228"},
+            "Opal": {"android": "com.withopal.opal", "ios": "id1497465230"},
+            "AppLock": {"android": "com.domobile.applockwatcher"},
+            "Block - App & Site Blocker": {},
+            "App Blocker: Screen Time": {},
+            "BePresent": {"ios": "id1644737181"},
+            "Brick": {"ios": "id6448794069"},
+        },
+    },
+}
+
 
 class Database:
     def __init__(self, db_path: str = None):
@@ -224,6 +252,25 @@ class Database:
             if 'store_ids' not in columns:
                 conn.execute("ALTER TABLE competitors ADD COLUMN store_ids TEXT")
 
+            # Migration: watch list per competitor. Existing rows join the default
+            # (interval-timer) list through the column default; nothing is deleted.
+            if 'watch_list' not in columns:
+                conn.execute(
+                    "ALTER TABLE competitors ADD COLUMN watch_list TEXT NOT NULL "
+                    f"DEFAULT '{DEFAULT_WATCH_LIST}'"
+                )
+
+            # Migration: a dismissed alert stays in the table, so a rebuild cannot recreate it
+            columns = [row['name'] for row in conn.execute("PRAGMA table_info(alerts)")]
+            if 'is_dismissed' not in columns:
+                conn.execute("ALTER TABLE alerts ADD COLUMN is_dismissed BOOLEAN DEFAULT 0")
+
+            # Migration: watch list per analysis report. NULL marks a report from
+            # before the lists existed, which covered the default list.
+            columns = [row['name'] for row in conn.execute("PRAGMA table_info(digests)")]
+            if 'watch_list' not in columns:
+                conn.execute("ALTER TABLE digests ADD COLUMN watch_list TEXT")
+
             # Migration: review content hash for dedupe; backfill existing rows
             columns = [row['name'] for row in conn.execute("PRAGMA table_info(competitor_reviews)")]
             if 'content_hash' not in columns:
@@ -240,19 +287,22 @@ class Database:
 
     # Competitor operations
     def add_competitor(self, name: str, website: str = None, description: str = None,
-                       store_ids: dict = None) -> int:
+                       store_ids: dict = None, watch_list: str = None) -> int:
         """Add a competitor, or reactivate an existing one.
 
-        Store IDs given here are merged into any IDs already saved.
+        Store IDs given here are merged into any IDs already saved. A watch list
+        given here moves an existing competitor to that list.
         """
         with self.get_conn() as conn:
             cursor = conn.execute(
-                "INSERT OR IGNORE INTO competitors (name, website, description) VALUES (?, ?, ?)",
-                (name, website, description)
+                "INSERT OR IGNORE INTO competitors (name, website, description, watch_list) VALUES (?, ?, ?, ?)",
+                (name, website, description, watch_list or DEFAULT_WATCH_LIST)
             )
             competitor_id = cursor.lastrowid if cursor.rowcount else None
             if not competitor_id:
                 conn.execute("UPDATE competitors SET is_active = 1 WHERE name = ?", (name,))
+                if watch_list:
+                    conn.execute("UPDATE competitors SET watch_list = ? WHERE name = ?", (watch_list, name))
                 row = conn.execute("SELECT id FROM competitors WHERE name = ?", (name,)).fetchone()
                 competitor_id = row['id'] if row else None
 
@@ -291,16 +341,39 @@ class Database:
             self.add_competitor(name=name, store_ids=store_ids)
         return len(seed)
 
+    def seed_watch_lists(self) -> int:
+        """Add the seed competitors of every watch list. Returns the count added.
+
+        Never touches an existing row, so an unwatched competitor stays unwatched.
+        """
+        added = 0
+        with self.get_conn() as conn:
+            for key, watch_list in WATCH_LISTS.items():
+                for name, store_ids in watch_list["seed"].items():
+                    cursor = conn.execute(
+                        "INSERT OR IGNORE INTO competitors (name, store_ids, watch_list) VALUES (?, ?, ?)",
+                        (name, json.dumps(store_ids), key)
+                    )
+                    added += cursor.rowcount
+        return added
+
     def get_competitor_by_name(self, name: str) -> Optional[int]:
         with self.get_conn() as conn:
             row = conn.execute("SELECT id FROM competitors WHERE name = ?", (name,)).fetchone()
             return row['id'] if row else None
 
-    def get_active_competitors(self) -> list[dict]:
+    def get_active_competitors(self, watch_list: str = None) -> list[dict]:
+        """Active competitors in one watch list, or in all lists when watch_list is None."""
         with self.get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM competitors WHERE is_active = 1 ORDER BY created_at DESC"
-            ).fetchall()
+            if watch_list:
+                rows = conn.execute(
+                    "SELECT * FROM competitors WHERE is_active = 1 AND watch_list = ? ORDER BY created_at DESC",
+                    (watch_list,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM competitors WHERE is_active = 1 ORDER BY created_at DESC"
+                ).fetchall()
             return self._rows_to_dicts(rows)
 
     def remove_competitor(self, name: str) -> bool:
@@ -359,25 +432,32 @@ class Database:
             ).fetchone()
             return row is not None
 
-    def get_recent_findings(self, hours: int = 24, finding_type: str = None) -> list[dict]:
+    def get_recent_findings(self, hours: int = 24, finding_type: str = None,
+                            watch_list: str = None) -> list[dict]:
         cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        query = """SELECT f.*, c.name as competitor_name FROM findings f
+                   LEFT JOIN competitors c ON f.competitor_id = c.id
+                   WHERE f.created_at > datetime('now', ?)"""
+        params = [cutoff]
+        if finding_type:
+            query += " AND f.finding_type = ?"
+            params.append(finding_type)
+        query, params = self._scope(query, params, watch_list)
         with self.get_conn() as conn:
-            if finding_type:
-                rows = conn.execute(
-                    """SELECT f.*, c.name as competitor_name FROM findings f 
-                       LEFT JOIN competitors c ON f.competitor_id = c.id
-                       WHERE f.finding_type = ? AND f.created_at > datetime('now', ?) 
-                       ORDER BY f.importance DESC""",
-                    (finding_type, cutoff)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT f.*, c.name as competitor_name FROM findings f 
-                       LEFT JOIN competitors c ON f.competitor_id = c.id
-                       WHERE f.created_at > datetime('now', ?) ORDER BY f.importance DESC""",
-                    (cutoff,)
-                ).fetchall()
+            rows = conn.execute(query + " ORDER BY f.importance DESC", params).fetchall()
             return self._rows_to_dicts(rows)
+
+    @staticmethod
+    def _scope(query: str, params: list, watch_list: Optional[str]) -> tuple[str, list]:
+        """Limit a query that joins competitors as `c` to one watch list.
+
+        A row without a competitor belongs to the default list, which is the
+        market the tool watched before the lists existed.
+        """
+        if watch_list:
+            query += " AND COALESCE(c.watch_list, ?) = ?"
+            params = [*params, DEFAULT_WATCH_LIST, watch_list]
+        return query, params
 
     def get_unread_findings(self) -> list[dict]:
         with self.get_conn() as conn:
@@ -397,13 +477,24 @@ class Database:
             conn.execute("UPDATE findings SET finding_type = ? WHERE id = ?", (finding_type, finding_id))
 
     # Digests
-    def add_digest(self, digest_type: str, content: str) -> int:
+    def add_digest(self, digest_type: str, content: str, watch_list: str = None) -> int:
         with self.get_conn() as conn:
             cursor = conn.execute(
-                "INSERT INTO digests (digest_type, content) VALUES (?, ?)",
-                (digest_type, content)
+                "INSERT INTO digests (digest_type, content, watch_list) VALUES (?, ?, ?)",
+                (digest_type, content, watch_list)
             )
             return cursor.lastrowid
+
+    def get_latest_digest(self, digest_type: str, prefix: str, watch_list: str = None) -> Optional[dict]:
+        """Newest digest of a type whose content starts with prefix, in one watch list."""
+        query = "SELECT * FROM digests WHERE digest_type = ? AND substr(content, 1, ?) = ?"
+        params = [digest_type, len(prefix), prefix]
+        if watch_list:
+            query += " AND COALESCE(watch_list, ?) = ?"
+            params += [DEFAULT_WATCH_LIST, watch_list]
+        with self.get_conn() as conn:
+            row = conn.execute(query + " ORDER BY id DESC LIMIT 1", params).fetchone()
+            return dict(row) if row else None
 
     def mark_digest_sent(self, digest_id: int):
         with self.get_conn() as conn:
@@ -540,15 +631,16 @@ class Database:
                 rows = conn.execute("SELECT * FROM app_store_listings").fetchall()
             return self._rows_to_dicts(rows)
 
-    def get_aso_changes(self, hours: int = 24) -> list[dict]:
+    def get_aso_changes(self, hours: int = 24, watch_list: str = None) -> list[dict]:
         cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        query, params = self._scope(
+            """SELECT ac.*, c.name as competitor_name FROM aso_changes ac
+               LEFT JOIN competitors c ON ac.competitor_id = c.id
+               WHERE ac.detected_at > datetime('now', ?)""",
+            [cutoff], watch_list
+        )
         with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT ac.*, c.name as competitor_name FROM aso_changes ac
-                   LEFT JOIN competitors c ON ac.competitor_id = c.id
-                   WHERE ac.detected_at > datetime('now', ?) ORDER BY ac.detected_at DESC""",
-                (cutoff,)
-            ).fetchall()
+            rows = conn.execute(query + " ORDER BY ac.detected_at DESC", params).fetchall()
             return self._rows_to_dicts(rows)
 
     # Competitor Reviews
@@ -700,17 +792,25 @@ class Database:
         with self.get_conn() as conn:
             conn.execute("UPDATE alerts SET is_sent = 1 WHERE id = ?", (alert_id,))
 
-    def get_recent_alerts(self, hours: int = 168, limit: int = 50) -> list[dict]:
+    def get_recent_alerts(self, hours: int = 168, limit: int = 50, watch_list: str = None) -> list[dict]:
+        """Recent alerts that are not dismissed, newest first."""
         cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
+        query, params = self._scope(
+            """SELECT a.*, c.name as competitor_name FROM alerts a
+               LEFT JOIN competitors c ON a.competitor_id = c.id
+               WHERE a.created_at > datetime('now', ?) AND COALESCE(a.is_dismissed, 0) = 0""",
+            [cutoff], watch_list
+        )
         with self.get_conn() as conn:
             rows = conn.execute(
-                """SELECT a.*, c.name as competitor_name FROM alerts a
-                   LEFT JOIN competitors c ON a.competitor_id = c.id
-                   WHERE a.created_at > datetime('now', ?)
-                   ORDER BY a.created_at DESC, a.id DESC LIMIT ?""",
-                (cutoff, limit)
+                query + " ORDER BY a.created_at DESC, a.id DESC LIMIT ?", [*params, limit]
             ).fetchall()
             return self._rows_to_dicts(rows)
+
+    def dismiss_alert(self, alert_id: int) -> bool:
+        with self.get_conn() as conn:
+            cursor = conn.execute("UPDATE alerts SET is_dismissed = 1 WHERE id = ?", (alert_id,))
+            return cursor.rowcount > 0
 
 
 db = Database()

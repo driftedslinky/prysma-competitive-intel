@@ -11,6 +11,8 @@ def migrate(seed: bool = False):
     if seed:
         count = db.seed_default_competitors()
         print(f"✅ Seeded {count} default competitors with store IDs")
+        added = db.seed_watch_lists()
+        print(f"✅ Added {added} watch-list competitors")
     return db
 
 
