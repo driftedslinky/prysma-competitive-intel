@@ -10,6 +10,8 @@ from prysma.agents.discovery import (
     SOURCE_PLAY,
     DiscoveryAgent,
     apply_relevance,
+    is_usable_summary,
+    looks_like_placeholder,
     merge_candidates,
     normalise_name,
     parse_input,
@@ -34,6 +36,25 @@ def _cand(name, platform="android", package=None, ios_id=None, rating_count=None
         "sources": [source],
         "_position": position,
     }
+
+
+class TestProfileValidation:
+    """A small model can echo the profiling prompt. That must not reach the UI."""
+
+    def test_rejects_echoed_template(self):
+        assert not is_usable_summary("<one line, max 120 chars>")
+        assert looks_like_placeholder("<3-5 short comma-separated features>")
+
+    def test_rejects_stubs(self):
+        assert not is_usable_summary("One")
+        assert not is_usable_summary("...")
+        assert not is_usable_summary("")
+        assert not is_usable_summary("N/A")
+        assert not is_usable_summary("   ")
+
+    def test_accepts_a_real_summary(self):
+        assert is_usable_summary(
+            "BlockSite blocks distracting apps and websites to help you stay focused.")
 
 
 class TestParseInput:
