@@ -194,6 +194,48 @@ class TestInsightsAndCards:
     def test_card_without_changes_says_so(self, client):
         assert "No listing changes in the last 7 days." in client.get("/").text
 
+    def test_aso_kpi_counts_the_same_rows_the_cards_show(self, client, test_db):
+        """The KPI and the cards it links to must count the same rows.
+
+        A description repair from the old scraper is dropped from the cards, so it
+        must not be counted either. Dropping it in one place only made the two
+        disagree, which breaks the invariant app.py states directly.
+        """
+        import re as _re
+
+        cid = test_db.get_competitor_by_name("Timer A")
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", title="First title")
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", title="Second title")
+        junk = '{"operatingSystem":"ANDROID","applicationCategory":"SPORTS"}'
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", description=junk)
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", description="A real description")
+
+        page = client.get("/").text
+        assert "operatingSystem" not in page, "the repair row reached the page"
+
+        card = page[page.index(f"id='comp-{cid}'"):]
+        card = card[:card.index("</article>")]
+        shown = card.count("<li>")
+
+        m = _re.search(r'ASO changes \([^)]*\)</div><div class="figure">(\d+)</div>', page)
+        assert m, "ASO KPI card not found"
+        assert int(m.group(1)) == shown, f"KPI says {m.group(1)}, cards show {shown}"
+
+    def test_a_title_with_a_quote_is_not_treated_as_a_data_repair(self, client, test_db):
+        """Only descriptions are repair candidates, as in the alert engine.
+
+        The markers include a bare backslash-quote, so applying the rule to every
+        change type would hide legitimate title edits.
+        """
+        cid = test_db.get_competitor_by_name("Timer A")
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", title="Old name")
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", title='He said \\"focus\\"')
+
+        page = client.get("/").text
+        card = page[page.index(f"id='comp-{cid}'"):]
+        card = card[:card.index("</article>")]
+        assert "focus" in card, "a real title change was dropped as a data repair"
+
     def test_overview_order(self, client):
         page = client.get("/").text
         order = [page.index(marker) for marker in

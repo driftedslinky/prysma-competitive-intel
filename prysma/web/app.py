@@ -263,6 +263,27 @@ CHANGE_LABELS = {
 CARD_CHANGES_SHOWN = 5
 
 
+def _drop_structured_data_repairs(changes: list[dict]) -> list[dict]:
+    """Remove JSON-LD repair rows, so the KPI and the cards count the same rows.
+
+    An older scraper stored the page's JSON-LD payload as the app description.
+    Correcting that registers as a description change, but it is a data repair,
+    not a competitor move. The alert engine skips the same rows, and it gates on
+    change_type first, so this does too: a title or version that merely contains
+    a quote must stay visible.
+    """
+    from prysma.agents.alerts import _looks_like_structured_data
+
+    return [
+        ac for ac in changes
+        if not (
+            ac.get("change_type") == "description"
+            and (_looks_like_structured_data(str(ac.get("old_value") or ""))
+                 or _looks_like_structured_data(str(ac.get("new_value") or "")))
+        )
+    ]
+
+
 def _card_changes(changes: list[dict]) -> str:
     """The ASO change list under one competitor card, newest first."""
     if not changes:
@@ -289,7 +310,9 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
     watch_list = _watch_list(list_key)
     competitors = db.get_active_competitors(watch_list=watch_list)
     findings = db.get_recent_findings(hours=FINDINGS_HOURS, watch_list=watch_list)
-    aso_changes = db.get_aso_changes(hours=ASO_HOURS, watch_list=watch_list)
+    # Drop JSON-LD repair rows once, here, so the KPI count and the cards agree.
+    aso_changes = _drop_structured_data_repairs(
+        db.get_aso_changes(hours=ASO_HOURS, watch_list=watch_list))
     alerts = db.get_recent_alerts(hours=ALERT_HOURS, watch_list=watch_list)
     # New entrants and trends come from keyword searches, not from a competitor,
     # so they cannot belong to one watch list. The page says so.
