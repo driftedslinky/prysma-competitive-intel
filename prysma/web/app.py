@@ -44,6 +44,9 @@ app = FastAPI(
 # Per-IP hourly limit for the endpoints that spend Nebius and Tavily credits.
 RATE_LIMIT_PER_HOUR = 20
 RATE_LIMIT_WINDOW_SECONDS = 3600
+# Cap on distinct clients tracked at once, so the bucket map cannot grow without
+# bound. Far more than a real audience needs, and cheap to prune.
+RATE_LIMIT_MAX_CLIENTS = 4096
 _rate_hits: dict[str, deque] = {}
 _rate_lock = threading.Lock()
 
@@ -53,6 +56,20 @@ def _rate_limited(request: Request) -> Optional[JSONResponse]:
     ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
     with _rate_lock:
+        # Bound the map: an attacker (or a large audience) could otherwise grow
+        # it without limit. The new client is inserted below, so prune to
+        # strictly below the cap first, and only when this client is new --
+        # otherwise a returning client could evict itself.
+        if ip not in _rate_hits and len(_rate_hits) >= RATE_LIMIT_MAX_CLIENTS:
+            # Drop fully-expired buckets.
+            for key in [k for k, v in _rate_hits.items()
+                        if not v or now - v[-1] >= RATE_LIMIT_WINDOW_SECONDS]:
+                del _rate_hits[key]
+            # Still full: drop the least recently seen.
+            while len(_rate_hits) >= RATE_LIMIT_MAX_CLIENTS and _rate_hits:
+                oldest = min(_rate_hits, key=lambda k: _rate_hits[k][-1] if _rate_hits[k] else 0)
+                del _rate_hits[oldest]
+
         hits = _rate_hits.setdefault(ip, deque())
         while hits and now - hits[0] >= RATE_LIMIT_WINDOW_SECONDS:
             hits.popleft()
@@ -460,11 +477,22 @@ def run_scan(request: Request):
         return limited
     from prysma.main import run_scan_cycle
 
+    # One scan at a time. A second click while a scan is going used to start a
+    # second thread, so two cycles scraped the same apps and raced on writes.
+    scan_key = _watch_list(None)
+    if not _job_start("scan", scan_key):
+        return JSONResponse(
+            {"error": "A scan is already running. Check back in a minute."},
+            status_code=409,
+        )
+
     def _run():
         try:
             run_scan_cycle()
+            _job_finish("scan", scan_key, "Scan finished", "Scan finished")
         except Exception as e:
             print(f"Scan error: {e}")
+            _job_finish("scan", scan_key, f"Scan failed: {e}", "Scan finished")
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -656,7 +684,13 @@ def gaps(request: Request, list_key: Optional[str] = Query(None, alias="list")):
 
     scope = list_key if db.watch_list_exists(list_key) else None
     job_list = _watch_list(list_key)
-    _job_start("gaps", job_list)
+    # _job_start already refuses a second concurrent run; the return value used to
+    # be discarded, so the guard did nothing and two Ultra calls could run at once.
+    if not _job_start("gaps", job_list):
+        return JSONResponse(
+            {"error": "A gap analysis is already running for this watch list. Check back shortly."},
+            status_code=409,
+        )
     report = "Gap analysis failed."
     analyst = AnalystAgent()
     try:
@@ -748,17 +782,18 @@ def main():
     args = parser.parse_args()
 
     print(f"🚀 Prysma web dashboard starting on http://{args.host}:{args.port}")
-    # Traefik fronts this app, so without these every request appears to come
-    # from the proxy's address and the per-IP rate limit becomes one global
-    # bucket. The container port is not published to the host, so only Traefik
-    # can reach the app and trusting X-Forwarded-For is safe here.
+    # Traefik fronts this app, so without proxy headers every request appears to
+    # come from the proxy and the per-IP rate limit becomes one global bucket.
+    # But trusting "*" is not the fix: uvicorn then returns the LEFTMOST
+    # X-Forwarded-For value, which the caller supplies, so anyone could mint a new
+    # bucket per request. Name the proxy's network instead.
     uvicorn.run(
         app,
         host=args.host,
         port=args.port,
         log_level="info",
         proxy_headers=True,
-        forwarded_allow_ips="*",
+        forwarded_allow_ips=config.web_trusted_proxies,
     )
 
 

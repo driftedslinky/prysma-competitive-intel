@@ -17,6 +17,24 @@ from prysma.security import sanitize_scraped_content
 from prysma.config import config
 
 
+def parse_play_price(text: str) -> str:
+    """Return "$4.99" or "Free" for a Google Play listing page.
+
+    Prefer the JSON-LD `offers` block: the first plain "price" on the page can
+    belong to another app in a carousel. Compare numerically, because "0.00"
+    means free while a string test against "0" would report "$0.00".
+    """
+    offers = re.search(r'"offers"\s*:\s*\[[^\]]*?"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', text)
+    match = offers or re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', text)
+    if match:
+        try:
+            if float(match.group(1)) > 0:
+                return f"${match.group(1)}"
+        except (TypeError, ValueError):
+            pass
+    return "Free"
+
+
 class CompetitiveIntelAgent:
     """Tracks competitor app store listings, ASO changes, reviews, and pricing."""
 
@@ -69,7 +87,10 @@ class CompetitiveIntelAgent:
         """Check competitor app stores for ASO changes."""
         competitors = db.get_active_competitors()
         for competitor in competitors:
-            store_ids = db.get_competitor_store_ids(competitor)
+            # Use the same seed-map fallback as _scan_reviews. Reading the column
+            # directly meant a competitor with empty store IDs was never scanned
+            # for listing changes, while its reviews were.
+            store_ids = self._store_ids(competitor)
 
             # Android
             if store_ids.get("android"):
@@ -150,10 +171,7 @@ class CompetitiveIntelAgent:
             updated = updated_match.group(1)
 
         # Price
-        price = "Free"
-        price_match = re.search(r'"price":"?(\d+\.?\d*)"?', text)
-        if price_match and price_match.group(1) != "0":
-            price = f"${price_match.group(1)}"
+        price = parse_play_price(text)
 
         # Developer
         developer = None
@@ -228,11 +246,14 @@ class CompetitiveIntelAgent:
             "developer": app.get("sellerName"),
             "rating": app.get("averageUserRating"),
             "ratings_count": app.get("userRatingCount"),
-            "description": app.get("description", "")[:2000],
-            "last_updated": app.get("currentVersionReleaseDate", "")[:10],
-            "price": app.get("formattedPrice", "Free"),
+            # "or" rather than a default argument: a key that exists but is null
+            # returns None, and None[:2000] raises TypeError. That aborted the
+            # whole app upsert, so the listing silently stopped updating.
+            "description": (app.get("description") or "")[:2000],
+            "last_updated": (app.get("currentVersionReleaseDate") or "")[:10],
+            "price": app.get("formattedPrice") or "Free",
             "version": app.get("version"),
-            "subtitle": app.get("subtitle", ""),
+            "subtitle": app.get("subtitle") or "",
         }
 
     def _process_listing(
@@ -391,10 +412,15 @@ class CompetitiveIntelAgent:
         if not data or not data[0]:
             return []
         reviews = []
+        skipped = 0
         for row in data[0]:
             # [review_id, [author, ...], rating, null, text, [epoch_s, nanos], ...]
+            # Skip a malformed row instead of raising: one bad row used to abort
+            # the whole batch, so a single layout change discarded every review
+            # for that app on that run.
             if not (isinstance(row, list) and len(row) > 5 and isinstance(row[2], int)):
-                raise ValueError("Play reviews: unexpected review shape")
+                skipped += 1
+                continue
             timestamp = row[5][0] if row[5] else None
             reviews.append({
                 "rating": row[2],
@@ -406,6 +432,8 @@ class CompetitiveIntelAgent:
                     if timestamp else None
                 ),
             })
+        if skipped:
+            print(f"  Play reviews: skipped {skipped} malformed row(s)")
         return reviews
 
     def _store_reviews(

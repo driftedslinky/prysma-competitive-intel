@@ -30,6 +30,10 @@ class Config(BaseModel):
     trend_signal_threshold: int = 3
     trend_lookback_days: int = 30
     max_requests_per_minute: int = 10
+    # Peers whose X-Forwarded-For we believe. "*" would trust the header from
+    # anyone, which lets a caller choose its own rate-limit bucket. The web
+    # container's port is not published, so the only peer is the proxy.
+    web_trusted_proxies: str = "172.16.0.0/12"
 
 config = Config(
     telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
@@ -55,4 +59,5 @@ config = Config(
     trend_signal_threshold=int(os.getenv("TREND_SIGNAL_THRESHOLD", "3")),
     trend_lookback_days=int(os.getenv("TREND_LOOKBACK_DAYS", "30")),
     max_requests_per_minute=int(os.getenv("MAX_REQUESTS_PER_MINUTE", "10")),
+    web_trusted_proxies=os.getenv("WEB_TRUSTED_PROXIES", "172.16.0.0/12"),
 )

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from prysma.agents.competitive_intel import CompetitiveIntelAgent
+from prysma.agents.competitive_intel import CompetitiveIntelAgent, parse_play_price
 from prysma.storage.database import Database
 
 
@@ -145,9 +145,16 @@ class TestPlayReviews:
         text = ")]}'\n\n" + json.dumps([["wrb.fr", "UsvDTd", json.dumps([None, None])]])
         assert CompetitiveIntelAgent._parse_play_reviews(text) == []
 
-    def test_parse_changed_shape_raises(self):
-        with pytest.raises(ValueError):
-            CompetitiveIntelAgent._parse_play_reviews(_play_response([["id", "x"]]))
+    def test_parse_skips_a_changed_row_shape(self):
+        """A malformed row is skipped, not fatal.
+
+        One bad row used to raise and discard every review for that app on that
+        run, so a single layout change silently lost the whole batch.
+        """
+        assert CompetitiveIntelAgent._parse_play_reviews(_play_response([["id", "x"]])) == []
+        assert CompetitiveIntelAgent._parse_play_reviews(
+            _play_response([["id", "x"], PLAY_ROWS[0]]))  # good rows survive
+        # A response with no UsvDTd payload at all is still an error.
         with pytest.raises(ValueError):
             CompetitiveIntelAgent._parse_play_reviews(")]}'\n\n[[\"wrb.fr\", \"Other\", \"[]\"]]")
 
@@ -227,3 +234,45 @@ class TestPlayDescription:
 
     def test_none_when_missing(self):
         assert self.extract("<html></html>") is None
+
+
+class TestPlayPrice:
+    """The price bug: a free app reported as "$0.00"."""
+
+    def test_zero_decimal_is_free(self):
+        assert parse_play_price('"price":"0.00"') == "Free"
+
+    def test_bare_zero_is_free(self):
+        assert parse_play_price('"price":"0"') == "Free"
+
+    def test_paid_app_keeps_its_price(self):
+        assert parse_play_price('"price":"4.99"') == "$4.99"
+
+    def test_offers_block_beats_a_carousel_price(self):
+        # First plain price belongs to another app; offers is this app's own.
+        text = '"price":"9.99" ... "offers":[{"price":"0.00"}]'
+        assert parse_play_price(text) == "Free"
+
+    def test_no_price_at_all_is_free(self):
+        assert parse_play_price("<html>nothing here</html>") == "Free"
+
+
+class TestListingsUseTheSameStoreIdsAsReviews:
+    """The drift bug: listings read the column, reviews used the seed fallback."""
+
+    def test_a_seed_only_competitor_is_scanned_for_listing_changes(self, agent, test_db):
+        test_db.add_competitor("Tabata Timer")  # seed map has ids, column is empty
+        competitor = next(c for c in test_db.get_active_competitors()
+                          if c["name"] == "Tabata Timer")
+        assert not competitor.get("store_ids")
+
+        calls = []
+        agent._scrape_google_play = lambda *a, **k: calls.append(("android", a[:2])) or None
+        agent._scrape_app_store = lambda *a, **k: calls.append(("ios", a[:2])) or None
+
+        agent._scan_app_listings()
+
+        platforms = {c[0] for c in calls}
+        assert platforms == {"android", "ios"}, "both stores should be checked"
+        # The seed id must be the one used, not an empty column value.
+        assert any("1255964203" in str(c[1]) for c in calls if c[0] == "ios")
