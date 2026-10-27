@@ -8,8 +8,8 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
   (Stripe "All subscriptions / Test clocks", Mercury "Employee budgets / Team
   members") or a pill segmented control (Kraken "Balances / Open orders",
   Mercury "Banking / Books"). Four sections do not need a sidebar, so this page
-  uses underlined tabs for the sections and a segmented control for the
-  watch-list switch, the same split Mercury makes.
+  uses underlined tabs for the sections. The watch-list switch is a row of
+  pills above the panels (see "Watch lists" below).
 - KPI row. Stripe shows its status counts as a row of equal cards, label on
   top and a large number below, and each card is a filter you click. Kraken and
   Snowflake do the same with a muted label, one big tabular number and one
@@ -27,10 +27,18 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
   near-black surfaces and hairline borders. This page keeps the existing dark
   palette and blue accent, moves the surfaces closer to Fey, and turns the
   solid status badges into tinted pills like Stripe "Failed" or Fey "Sale".
+- Readability pass (the main reader is dyslexic). Larger base type (16 px),
+  1.6 line height, sentence-case table headings instead of small capitals,
+  more space between blocks, and report text capped near 70 characters a line.
+- Watch lists. Quicken "Spending Watchlist" gives each list its own small
+  menu control and ends the set with a "New watchlist" tile; Twenty ends its
+  dashboard list with a "+ Add New" row. The list row here does the same: one
+  pill per list, a small "Edit" control on each, and "+ Add new" last. Rename
+  and create open one inline form under the row, not a modal or a new page.
 - Dense tables. Fey's insider table, Kraken's market table and Stripe's
-  payments list use no vertical rules, faint row separators, small uppercase
-  muted headers, right-aligned tabular numbers, about 36-40 px rows, and a
-  result count. The tables here do the same.
+  payments list use no vertical rules, faint row separators, muted headers,
+  and a result count. The tables here do the same, with taller rows and
+  sentence-case headers for readability.
 -->
 <html lang="en">
 <head>
@@ -58,14 +66,14 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif;
-            background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55;
+            background: var(--bg); color: var(--text); font-size: 16px; line-height: 1.6; letter-spacing: 0.01em;
         }
         a { color: var(--accent); text-decoration: none; }
         a:hover { text-decoration: underline; }
         :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
         .muted { color: var(--muted); }
-        .small { font-size: 12px; }
+        .small { font-size: 14px; }
 
         /* Header: brand, watch-list switch, tabs */
         header { border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 5; }
@@ -76,19 +84,32 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
             border: 1px solid rgba(188, 140, 255, 0.4); color: var(--purple);
             padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
         }
-        .switch { display: flex; align-items: center; gap: 8px; }
-        .segmented { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
-        .seg { color: var(--muted); padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: 550; }
-        .seg:hover { color: var(--text); text-decoration: none; }
-        .seg[aria-current] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
-        [role=tablist] { display: flex; gap: 24px; margin-top: 12px; }
+
+        /* Watch lists: one pill per list, an Edit control on each, "+ Add new" last */
+        .lists-bar { padding: 20px; }
+        .list-pills { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .list-pill { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg); }
+        .list-pill a { color: var(--text); padding: 8px 8px 8px 18px; font-weight: 600; font-size: 16px; }
+        .list-pill a:hover { text-decoration: underline; }
+        .list-pill:has(a[aria-current]) { border-color: var(--accent); background: var(--accent-soft); }
+        .list-pill a[aria-current]::before { content: "✓ "; color: var(--accent); }
+        .pill-edit { background: none; border: none; border-left: 1px solid var(--border); color: var(--muted); padding: 8px 14px; margin-left: 4px; font-size: 14px; cursor: pointer; font-family: inherit; }
+        .pill-edit:hover { color: var(--text); text-decoration: underline; }
+        .pill-add { background: none; border: 1px dashed var(--border-strong); color: var(--accent); border-radius: 999px; padding: 8px 18px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .pill-add:hover { border-color: var(--accent); }
+        #list-form { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); display: grid; gap: 12px; max-width: 560px; }
+        #list-form[hidden] { display: none; }
+        #list-form .row { gap: 12px; }
+        .btn-danger { background: none; border-color: rgba(248, 81, 73, 0.5); color: var(--red); }
+        #list-status { min-height: 24px; }
+        [role=tablist] { display: flex; gap: 32px; margin-top: 12px; }
         [role=tab] {
             display: inline-flex; align-items: center; gap: 8px; padding: 10px 0 12px;
-            color: var(--muted); font-weight: 550; border-bottom: 2px solid transparent;
+            color: var(--muted); font-weight: 600; font-size: 16px; border-bottom: 3px solid transparent;
         }
         [role=tab]:hover { color: var(--text); text-decoration: none; }
         [role=tab][aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
-        .tab-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+        .tab-count { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
         .tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: none; }
         [role=tab].has-update .tab-dot { display: inline-block; }
 
@@ -103,36 +124,38 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         @keyframes spin { to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
-        main.wrap { padding-top: 24px; padding-bottom: 40px; }
-        [role=tabpanel] { display: grid; gap: 24px; }
+        main.wrap { padding-top: 32px; padding-bottom: 48px; display: grid; gap: 40px; }
+        [role=tabpanel] { display: grid; gap: 40px; }
         [role=tabpanel][hidden] { display: none; }
 
         /* Blocks: every section has a heading row */
-        .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
-        .block-head h2 { font-size: 16px; font-weight: 650; }
-        .block-head .sub { color: var(--muted); font-size: 13px; }
-        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+        .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+        .block-head h2 { font-size: 20px; font-weight: 650; }
+        .block-head .sub { color: var(--muted); font-size: 15px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+        .market { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+        .market .block-head h2 { font-size: 24px; }
 
         /* KPI row */
-        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-        .kpi { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color 0.15s, background 0.15s; }
+        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+        .kpi { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: border-color 0.15s, background 0.15s; }
         .kpi:hover, .kpi:focus-within { border-color: var(--border-strong); background: var(--surface-2); }
         .kpi-link { color: inherit; display: block; }
         .kpi-link:hover { text-decoration: none; }
         .kpi-link::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
         .kpi-link:focus-visible { outline: none; }
         .kpi-link:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
-        .kpi .label { color: var(--muted); font-size: 13px; }
+        .kpi .label { color: var(--muted); font-size: 15px; }
         .kpi .figure { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; margin-top: 4px; }
-        .kpi .go { color: var(--muted); font-size: 12px; }
+        .kpi .go { color: var(--muted); font-size: 14px; }
         .kpi:hover .go { color: var(--accent); }
         .kpi-action { position: absolute; top: 12px; right: 12px; z-index: 1; }
 
         /* Controls */
         .btn {
             background: var(--accent); color: #0b0e13; border: 1px solid transparent;
-            padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px;
+            padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 15px;
             cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-family: inherit;
         }
         .btn:hover { filter: brightness(1.08); text-decoration: none; }
@@ -140,85 +163,111 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         .btn-secondary { background: var(--surface-2); border-color: var(--border-strong); color: var(--text); }
         .btn-link {
             background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px;
-            padding: 2px 8px; font-size: 12px; cursor: pointer; font-family: inherit;
+            padding: 4px 10px; font-size: 14px; cursor: pointer; font-family: inherit;
         }
         .btn-link:hover { color: var(--text); border-color: var(--border-strong); }
-        .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
         .field { display: flex; gap: 8px; }
         .field input {
             flex: 1; background: var(--bg); border: 1px solid var(--border-strong); color: var(--text);
-            padding: 9px 12px; border-radius: 8px; font-size: 14px; font-family: inherit; min-width: 0;
+            padding: 11px 14px; border-radius: 8px; font-size: 16px; font-family: inherit; min-width: 0;
         }
         .field input::placeholder { color: #6e7681; }
-        label.label-text { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+        label.label-text { display: block; font-size: 15px; color: var(--muted); margin-bottom: 8px; }
 
         /* Tables */
         .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        th, td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
         tbody tr:last-child td { border-bottom: none; }
         tbody tr:hover td { background: rgba(255, 255, 255, 0.015); }
-        th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
-        td { font-size: 13px; }
+        th { color: var(--muted); font-weight: 600; font-size: 14px; }
+        td { font-size: 15px; line-height: 1.6; }
+        td .detail { margin-top: 6px; }
+        td.when-col { white-space: nowrap; color: var(--muted); }
+        td.actions { white-space: nowrap; }
+        td.actions span { display: block; margin-bottom: 6px; }
+        td.actions span:last-child { margin-bottom: 0; }
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         td.clip { max-width: 220px; overflow-wrap: anywhere; color: var(--muted); }
-        .empty { color: var(--muted); padding: 16px; }
+        .empty { color: var(--muted); padding: 20px; }
 
         /* Badges: tinted, not solid */
-        .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap;
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 14px; font-weight: 600; white-space: nowrap;
                  background: rgba(139, 148, 158, 0.15); color: var(--muted); }
-        .badge-change, .badge-hiring { background: rgba(88, 166, 255, 0.14); color: var(--accent); }
-        .badge-news, .badge-product_launch { background: rgba(63, 185, 80, 0.14); color: var(--green); }
-        .badge-opportunity, .badge-funding { background: rgba(210, 153, 34, 0.16); color: var(--orange); }
-        .badge-pricing_change { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
-        .badge-negative_news { background: rgba(248, 81, 73, 0.15); color: var(--red); }
-        .badge-sev-high { background: rgba(248, 81, 73, 0.15); color: var(--red); }
-        .badge-sev-medium { background: rgba(210, 153, 34, 0.16); color: var(--orange); }
-        .badge-sev-low { background: rgba(139, 148, 158, 0.15); color: var(--muted); }
+        /* Insight types. The label always says the type; colour only helps scanning. */
+        .type-rating { background: rgba(210, 153, 34, 0.16); color: var(--orange); }
+        .type-listing { background: rgba(88, 166, 255, 0.14); color: var(--accent); }
+        .type-review { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+        .type-news { background: rgba(63, 185, 80, 0.14); color: var(--green); }
         .badge-platform { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
         .pill-ready { background: rgba(63, 185, 80, 0.14); color: var(--green); }
         .pill-error { background: rgba(248, 81, 73, 0.15); color: var(--red); }
 
         /* Competitor cards and discovery candidates */
-        .comp { display: flex; flex-direction: column; gap: 6px; }
+        .comp { display: flex; flex-direction: column; gap: 10px; }
+        .comp:target, .comp.focus { border-color: var(--accent); }
         .comp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-        .card h3 { font-size: 14px; font-weight: 650; }
-        .card .muted { font-size: 13px; }
-        .stores { font-size: 12px; margin-top: auto; }
-        #discover-status { margin-top: 12px; font-size: 13px; }
+        .card h3 { font-size: 18px; font-weight: 650; }
+        .card .muted { font-size: 15px; }
+        .stores { font-size: 15px; }
+        .comp-changes { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 6px; }
+        .comp-changes h4 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+        .changes { list-style: none; display: grid; gap: 14px; }
+        .change-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 15px; }
+        .change-head .muted { font-size: 14px; }
+        .change-diff { font-size: 15px; overflow-wrap: anywhere; margin-top: 2px; }
+        .changes-none { color: var(--muted); font-size: 15px; }
+        #discover-status { margin-top: 12px; font-size: 15px; }
         #discover-results { display: none; margin-top: 16px; }
         .candidate { display: flex; gap: 12px; align-items: flex-start; }
         .candidate input[type=checkbox] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
-        .candidate .features { font-size: 12px; color: var(--muted); }
+        .candidate .features { font-size: 14px; color: var(--muted); }
         .watch-bar { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
         .search-result { padding: 12px 16px; border-bottom: 1px solid var(--border); }
         .search-result:last-child { border-bottom: none; }
         .search-result a { font-weight: 600; }
-        .search-result p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+        .search-result p { font-size: 15px; color: var(--muted); margin-top: 4px; }
         #search-results:empty { display: none; }
         #search-results { margin-top: 12px; }
 
         /* Analysis */
         .analysis { display: grid; gap: 24px; }
-        .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); min-height: 22px; }
-        .report { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; line-height: 1.75; margin-top: 12px; overflow-wrap: anywhere; }
+        .status-line { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); min-height: 24px; }
+        /* Reports: rendered from a safe Markdown subset on the server */
+        .report { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px 40px; line-height: 1.8; margin-top: 16px; overflow-wrap: anywhere; font-size: 17px; }
+        .report > * { max-width: 72ch; }
+        .report > * + * { margin-top: 18px; }
+        .report h3, .report h4 { line-height: 1.3; margin-top: 36px; }
+        .report h2 { font-size: 26px; margin-top: 36px; }
+        .report h3 { font-size: 22px; }
+        .report h4 { font-size: 19px; }
+        .report > :first-child { margin-top: 0; }
+        .report strong { color: #fff; font-weight: 700; }
+        .report ul, .report ol { padding-left: 28px; }
+        .report li { padding-left: 6px; }
+        .report li + li { margin-top: 10px; }
+        .report li > ul, .report li > ol { margin-top: 10px; }
+        .report code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 0.92em; }
+        .report hr { border: none; border-top: 1px solid var(--border); }
 
         /* Toast */
         #toast {
             position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
             background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px;
-            padding: 10px 16px; font-size: 13px; display: none; gap: 12px; align-items: center;
+            padding: 12px 18px; font-size: 15px; display: none; gap: 12px; align-items: center;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); z-index: 10; max-width: calc(100% - 32px);
         }
         #toast.show { display: flex; }
 
-        footer { border-top: 1px solid var(--border); padding: 24px 0 32px; color: var(--muted); font-size: 12px; }
+        footer { border-top: 1px solid var(--border); padding: 24px 0 32px; color: var(--muted); font-size: 14px; }
         footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
         .tech-badge { display: inline-block; border: 1px solid var(--border); padding: 1px 8px; border-radius: 999px; margin: 2px 2px 2px 0; }
 
         @media (max-width: 760px) {
             .wrap { padding: 0 16px; }
             .kpis { grid-template-columns: repeat(2, 1fr); }
+            .report { padding: 20px; }
             [role=tablist] { gap: 16px; overflow-x: auto; }
         }
     </style>
@@ -231,10 +280,6 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <h1>Prysma</h1>
                     <span class="badge-hack">Nebius x NVIDIA Hackathon 2026</span>
                 </div>
-                <div class="switch">
-                    <span class="muted small" id="switch-label">Watch list</span>
-                    <nav class="segmented" aria-labelledby="switch-label">{list_options}</nav>
-                </div>
             </div>
             <div role="tablist" aria-label="Dashboard sections" id="tabs">
                 <a role="tab" id="tab-overview" href="#overview" aria-controls="panel-overview" aria-selected="true">Overview</a>
@@ -246,8 +291,54 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
     </header>
 
     <main class="wrap">
+        <!-- Watch lists: shown on every tab, every tab is scoped to the selected list -->
+        <section class="card lists-bar" aria-labelledby="h-lists">
+            <div class="block-head">
+                <h2 id="h-lists">Watch list</h2>
+                <span class="sub">Every tab shows the selected list only</span>
+            </div>
+            <nav aria-labelledby="h-lists">
+                <ul class="list-pills" id="list-pills">
+                    {list_options}
+                    <li><button type="button" class="pill-add" data-action="add-list">+ Add new</button></li>
+                </ul>
+            </nav>
+            <form id="list-form" hidden>
+                <label class="label-text" for="list-name" id="list-form-label">Name of the new list</label>
+                <div class="field">
+                    <input type="text" id="list-name" maxlength="{list_name_max}" autocomplete="off" placeholder="e.g. Video games" required>
+                </div>
+                <div class="row">
+                    <button type="submit" class="btn" id="list-save">Create list</button>
+                    <button type="button" class="btn btn-secondary" data-action="cancel-list">Cancel</button>
+                    <button type="button" class="btn btn-secondary btn-danger" id="list-delete" hidden>Delete this list</button>
+                </div>
+                <div id="list-status" class="muted" role="status" aria-live="polite"></div>
+            </form>
+        </section>
+
         <!-- Overview -->
         <section role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+            <section class="card market" aria-labelledby="h-market">
+                <div class="block-head">
+                    <h2 id="h-market">Find your market</h2>
+                    <span class="sub">Start here. Apps you watch join the {watch_list_label} list.</span>
+                </div>
+                <label class="label-text" for="discover-query">Your app, a store link, or an app idea</label>
+                <div class="field">
+                    <input type="text" id="discover-query" placeholder="e.g. a HIIT timer with voice cues" onkeydown="if(event.key==='Enter')discoverCompetitors()">
+                    <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
+                </div>
+                <div id="discover-status" class="muted" role="status"></div>
+                <div id="discover-results">
+                    <div class="grid" id="candidate-grid"></div>
+                    <div class="watch-bar">
+                        <button class="btn" id="watch-btn" onclick="watchSelected()">Watch selected</button>
+                        <span id="watch-status" class="muted"></span>
+                    </div>
+                </div>
+            </section>
+
             <section aria-labelledby="h-summary">
                 <div class="block-head">
                     <h2 id="h-summary">Summary · {watch_list_label}</h2>
@@ -267,26 +358,6 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <div class="kpi">
                         <a class="kpi-link" href="#insights"><div class="label">Alerts ({alerts_window})</div><div class="figure">{alerts_count}</div><div class="go">View alerts →</div></a>
                         <button type="button" class="btn-link kpi-action" data-action="rebuild-alerts">Rebuild</button>
-                    </div>
-                </div>
-            </section>
-
-            <section class="card" aria-labelledby="h-market">
-                <div class="block-head">
-                    <h2 id="h-market">Find your market</h2>
-                    <span class="sub">Apps you watch join the {watch_list_label} list</span>
-                </div>
-                <label class="label-text" for="discover-query">Your app, a store link, or an app idea</label>
-                <div class="field">
-                    <input type="text" id="discover-query" placeholder="e.g. a HIIT timer with voice cues" onkeydown="if(event.key==='Enter')discoverCompetitors()">
-                    <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
-                </div>
-                <div id="discover-status" class="muted" role="status"></div>
-                <div id="discover-results">
-                    <div class="grid" id="candidate-grid"></div>
-                    <div class="watch-bar">
-                        <button class="btn" id="watch-btn" onclick="watchSelected()">Watch selected</button>
-                        <span id="watch-status" class="muted"></span>
                     </div>
                 </div>
             </section>
@@ -325,17 +396,6 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                 <div class="grid">{comp_cards}</div>
             </section>
 
-            <section aria-labelledby="h-aso">
-                <div class="block-head">
-                    <h2 id="h-aso">ASO changes ({aso_window}) <span class="muted">({aso_count})</span></h2>
-                    <span class="sub">Store listing edits by the competitors above</span>
-                </div>
-                <div class="table-wrap"><table>
-                    <thead><tr><th>Competitor</th><th>Platform</th><th>Change</th><th>Old</th><th>New</th><th class="num">When (UTC)</th></tr></thead>
-                    <tbody>{aso_rows}</tbody>
-                </table></div>
-            </section>
-
             <section aria-labelledby="h-entrants">
                 <div class="block-head">
                     <h2 id="h-entrants">New entrants ({entrants_window})</h2>
@@ -356,7 +416,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <button type="button" class="btn btn-secondary" data-action="rebuild-alerts">Rebuild alerts</button>
                 </div>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Severity</th><th>Competitor</th><th>What changed</th><th class="num">When (UTC)</th><th class="num"><span class="muted">Action</span></th></tr></thead>
+                    <thead><tr><th>Type</th><th>Competitor</th><th>What changed</th><th>When (your time)</th><th>Go to</th></tr></thead>
                     <tbody>{alert_rows}</tbody>
                 </table></div>
             </section>
@@ -367,7 +427,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <span class="sub">Most important first</span>
                 </div>
                 <div class="table-wrap"><table>
-                    <thead><tr><th>Competitor</th><th>Type</th><th>Title</th><th class="num">Importance</th><th class="num">When (UTC)</th></tr></thead>
+                    <thead><tr><th>Type</th><th>Competitor</th><th>What happened</th><th>When (your time)</th><th>Go to</th></tr></thead>
                     <tbody>{findings_rows}</tbody>
                 </table></div>
             </section>
@@ -415,7 +475,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
     </footer>
 
     <script>
-    // The server picks the list from a fixed set of keys, so this value is safe.
+    // The server picks the list from keys it generated itself, so this value is safe.
     const WATCH_LIST = '{watch_list}';
     const TABS = ['overview', 'competitors', 'insights', 'analysis'];
     const KIND_LABEL = {analyze: 'Strategic analysis', gaps: 'Market gap analysis'};
@@ -431,9 +491,25 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
     function safeHttp(u) {
         return /^https?:\/\//i.test(u || '') ? u : '';
     }
-    function reportHtml(text) {
-        return esc(text).replace(/\n/g, '<br>');
+    // Times: the server writes UTC; show them in the reader's own time zone.
+    function localTime(iso) {
+        const d = new Date(iso);
+        if (isNaN(d)) return null;
+        const clock = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const days = Math.round((today - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+        if (days === 0) return 'Today, ' + clock;
+        if (days === 1) return 'Yesterday, ' + clock;
+        if (days > 1 && days < 7) return days + ' days ago, ' + clock;
+        return d.toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'}) + ', ' + clock;
     }
+    function localiseTimes(root) {
+        for (const t of (root || document).querySelectorAll('time.when')) {
+            const text = localTime(t.getAttribute('datetime'));
+            if (text) { t.title = t.textContent; t.textContent = text; }
+        }
+    }
+    localiseTimes();
 
     // --- Toast -----------------------------------------------------------
     let toastTimer = null;
@@ -462,8 +538,8 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         }
         if (tab === 'analysis') document.getElementById('tab-analysis').classList.remove('has-update');
         // Keep the tab when the user switches watch list
-        for (const a of document.querySelectorAll('.seg')) {
-            a.href = '?list=' + a.dataset.list + '#' + tab;
+        for (const a of document.querySelectorAll('.list-pill a')) {
+            a.href = '?list=' + encodeURIComponent(a.dataset.list) + '#' + tab;
         }
     }
     function goTab(tab, focusTab) {
@@ -482,6 +558,12 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         }
         showTab(tabFromHash());
         window.addEventListener('hashchange', () => showTab(tabFromHash()));
+        // ?c=<id> comes from "Open competitor" on an insight: show that card
+        const card = /^\d+$/.test(params.get('c') || '') && document.getElementById('comp-' + params.get('c'));
+        if (card) {
+            card.classList.add('focus');
+            card.scrollIntoView({block: 'center'});
+        }
         document.getElementById('tabs').addEventListener('keydown', e => {
             const i = TABS.indexOf(tabFromHash());
             let next = null;
@@ -498,9 +580,15 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
 
     // --- Card and table actions ------------------------------------------
     document.addEventListener('click', e => {
-        const el = e.target.closest('[data-action], [data-start], [data-unwatch], [data-dismiss]');
+        const el = e.target.closest('[data-action], [data-start], [data-unwatch], [data-dismiss], [data-edit-list]');
         if (!el) return;
-        if (el.dataset.action === 'add-competitors') {
+        if (el.dataset.action === 'add-list') {
+            openListForm(null, '');
+        } else if (el.dataset.editList) {
+            openListForm(el.dataset.editList, el.dataset.label);
+        } else if (el.dataset.action === 'cancel-list') {
+            document.getElementById('list-form').hidden = true;
+        } else if (el.dataset.action === 'add-competitors') {
             goTab('overview');
             const input = document.getElementById('discover-query');
             input.scrollIntoView({block: 'center'});
@@ -522,6 +610,46 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
             body: body ? JSON.stringify(body) : undefined
         }).then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || r.status), () => Promise.reject(r.status)));
     }
+    // --- Watch lists -------------------------------------------------------
+    // One inline form creates a list or renames and deletes the chosen one.
+    let editingList = null;
+    function openListForm(key, label) {
+        editingList = key;
+        const form = document.getElementById('list-form');
+        const input = document.getElementById('list-name');
+        document.getElementById('list-form-label').textContent = key ? 'New name for ' + label : 'Name of the new list';
+        document.getElementById('list-save').textContent = key ? 'Save name' : 'Create list';
+        const del = document.getElementById('list-delete');
+        del.hidden = !key;
+        del.dataset.label = label;
+        document.getElementById('list-status').textContent = '';
+        input.value = label;
+        form.hidden = false;
+        input.focus();
+    }
+    // Open a list. The same URL with a hash does not reload, so reload instead.
+    function goList(key) {
+        if (key === WATCH_LIST) location.reload();
+        else location.href = '?list=' + encodeURIComponent(key) + location.hash;
+    }
+    document.getElementById('list-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const name = document.getElementById('list-name').value.trim();
+        const status = document.getElementById('list-status');
+        if (!name) { status.textContent = 'Give the list a name.'; return; }
+        const url = editingList ? '/api/lists/' + encodeURIComponent(editingList) + '/rename' : '/api/lists';
+        postJson(url, {name: name})
+            .then(d => goList(d.key))
+            .catch(err => { status.textContent = typeof err === 'string' ? err : 'Could not save the list.'; });
+    });
+    document.getElementById('list-delete').addEventListener('click', e => {
+        const label = e.currentTarget.dataset.label;
+        if (!confirm('Delete the list ' + label + '? Its competitors are no longer watched. Their history stays.')) return;
+        postJson('/api/lists/' + encodeURIComponent(editingList) + '/delete')
+            .then(d => goList(editingList === WATCH_LIST ? d.next : WATCH_LIST))
+            .catch(err => { document.getElementById('list-status').textContent = typeof err === 'string' ? err : 'Could not delete the list.'; });
+    });
+
     function unwatch(btn, name) {
         if (!confirm('Stop watching ' + name + '? Its history stays, and you can watch it again later.')) return;
         btn.disabled = true;
@@ -665,12 +793,14 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         } else if (job.state === 'error') {
             status.innerHTML = '<span class="badge pill-error">Failed</span> ' + esc(job.message || 'No result.');
         } else if (job.report) {
+            const made = localTime(String(job.report.created_at).replace(' ', 'T') + 'Z');
             status.innerHTML = (job.state === 'done' ? '<span class="badge pill-ready">Ready</span> ' : '')
-                + 'Generated ' + esc(String(job.report.created_at).slice(0, 16)) + ' UTC';
+                + 'Generated ' + esc(made || String(job.report.created_at).slice(0, 16) + ' UTC');
         } else {
             status.textContent = 'Not run yet for this watch list.';
         }
-        if (job.report) report.innerHTML = reportHtml(job.report.content);
+        // The server renders and escapes the report; this page never parses it.
+        if (job.report) report.innerHTML = job.report.html;
         else if (!running) report.innerHTML = '<p class="muted">No ' + esc(KIND_LABEL[kind].toLowerCase())
             + ' yet. Select <strong>' + (kind === 'analyze' ? 'Run strategic analysis' : 'Find market gaps') + '</strong> above.</p>';
         report.hidden = running && !job.report;

@@ -21,12 +21,13 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from prysma.config import config
-from prysma.storage.database import DEFAULT_WATCH_LIST, WATCH_LISTS, db
+from prysma.storage.database import WATCH_LIST_NAME_MAX, db
+from prysma.web.markdown import render_report
 
 
 @asynccontextmanager
 async def _lifespan(_app):
-    """Give both watch lists content on a fresh database. Existing rows are untouched."""
+    """Give the seeded watch lists content on a fresh database. Existing rows are untouched."""
     db.seed_watch_lists()
     yield
 
@@ -81,6 +82,7 @@ ASO_HOURS = 168
 # better than a week: a 7-day window is usually empty even when the tool works.
 ALERT_HOURS = 720
 ENTRANTS_HOURS = 720
+REVIEW_HOURS = 720
 
 # Report headers the analyst writes. They tell the two kinds of research digest apart.
 STRATEGIC_PREFIX = "🧠 *Strategic Analysis*"
@@ -94,7 +96,7 @@ _jobs_lock = threading.Lock()
 
 def _watch_list(value: Optional[str]) -> str:
     """The requested watch list, or the default one for a missing or unknown key."""
-    return value if value in WATCH_LISTS else DEFAULT_WATCH_LIST
+    return value if db.watch_list_exists(value) else db.default_watch_list()
 
 
 def _job_start(kind: str, watch_list: str) -> bool:
@@ -126,7 +128,7 @@ def _job_view(kind: str, watch_list: str) -> dict:
 
 
 def _report_html(report: str) -> str:
-    return html.escape(report).replace("\n", "<br>\n")
+    return render_report(report)
 
 
 def _esc(value, fallback: str = "—") -> str:
@@ -153,6 +155,134 @@ def _empty_row(colspan: int, text: str) -> str:
     return f"<tr><td colspan='{colspan}' class='empty'>{text}</td></tr>"
 
 
+_TIMESTAMP = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?")
+
+
+def _when(value) -> str:
+    """A UTC database timestamp as a <time> element.
+
+    The text is a readable UTC fallback; the page script rewrites it in the
+    reader's own time zone ("Today, 14:05" or "3 days ago").
+    """
+    match = _TIMESTAMP.match(str(value or ""))
+    if not match:
+        return "—"
+    day, clock, seconds = match.group(1), match.group(2), match.group(3) or ":00"
+    stamp = datetime.strptime(day, "%Y-%m-%d").strftime("%d %b %Y").lstrip("0")
+    return f"<time class='when' datetime='{day}T{clock}{seconds}Z'>{stamp}, {clock} UTC</time>"
+
+
+# Insight types. The dashboard shows one of these four for every alert and
+# finding, mapped from data the detectors already write. There is no severity.
+INSIGHT_LABELS = {
+    "rating": "Rating change",
+    "listing": "Listing change",
+    "review": "Negative review",
+    "news": "Competitor news",
+}
+_RATING_CHANGES = {"rating", "ratings_count"}
+# 'opportunity' is the negative-review finding. 'sentiment' is review mood.
+_REVIEW_FINDINGS = {"opportunity", "sentiment"}
+
+
+def insight_type(source_table: Optional[str], kind: Optional[str], title: str = "") -> str:
+    """Map a stored change to one of the four insight types.
+
+    source_table is "aso_changes" (kind is the change_type) or "findings"
+    (kind is the finding_type). A website "change" finding has no closer
+    type than "listing"; reddit, github, trend and content findings are
+    shown as news, the closest of the four.
+    """
+    if source_table == "aso_changes":
+        return "rating" if kind in _RATING_CHANGES else "listing"
+    if kind in _REVIEW_FINDINGS:
+        return "review"
+    if kind == "change":
+        # ASO findings name the field: "ASO change: rating (Tabata Timer)"
+        field = re.match(r"ASO change: (\w+)", title or "")
+        return "rating" if field and field.group(1) in _RATING_CHANGES else "listing"
+    return "news"
+
+
+# What users ask for, by the complaint keyword the review scan matched.
+USER_ASKS = {
+    "screen off": "keep running with the screen off",
+    "background": "keep running in the background",
+    "stops": "keep running without stopping",
+    "ads": "fewer ads",
+    "subscription": "a one-off price instead of a subscription",
+    "expensive": "a lower price",
+    "too many": "fewer interruptions",
+    "doesn't work": "an app that works reliably",
+    "crash": "an app that does not crash",
+    "bug": "fewer bugs",
+    "slow": "a faster app",
+    "ugly": "a better-looking design",
+    "confusing": "a simpler, clearer design",
+    "complicated": "a simpler, clearer design",
+}
+_COMPLAINT = re.compile(r'Most common complaint: "([^"]+)" \((\d+) of (\d+)')
+
+
+def _complaint_html(content: Optional[str]) -> Optional[str]:
+    """The complaint and the user ask in a negative-review finding, as escaped HTML."""
+    match = _COMPLAINT.search(content or "")
+    if not match:
+        return None
+    keyword, hits, total = match.groups()
+    noun = "review" if total == "1" else "reviews"
+    text = f"<strong>Complaint:</strong> “{html.escape(keyword)}” in {hits} of {total} {noun}."
+    ask = USER_ASKS.get(keyword)
+    if ask:
+        text += f"<br><strong>Users ask for:</strong> {html.escape(ask)}."
+    return text
+
+
+def _insight_actions(kind: str, competitor_id, list_key: str, source_url: Optional[str]) -> str:
+    """Links from an insight to its reviews, its competitor, or its source."""
+    links = []
+    if competitor_id and kind in ("review", "rating"):
+        links.append(f"<a href='/reviews/{int(competitor_id)}'>Read the reviews</a>")
+    if kind == "news" and isinstance(source_url, str) and re.match(r"https?://", source_url):
+        links.append(f"<a href='{html.escape(source_url, quote=True)}' target='_blank' rel='noopener'>Read the source ↗</a>")
+    if competitor_id:
+        links.append(f"<a href='?list={html.escape(list_key, quote=True)}&amp;c={int(competitor_id)}#competitors'>Open competitor</a>")
+    return "".join(f"<span>{link}</span>" for link in links)
+
+
+def _type_badge(kind: str) -> str:
+    return f"<span class='badge type-{kind}'>{INSIGHT_LABELS[kind]}</span>"
+
+
+# ASO change labels for the competitor cards
+CHANGE_LABELS = {
+    "title": "Title", "subtitle": "Subtitle", "description": "Description", "price": "Price",
+    "screenshots": "Screenshots", "icon": "Icon", "category": "Category", "rating": "Rating",
+    "ratings_count": "Number of ratings", "release_date": "Release date", "version": "Version",
+}
+CARD_CHANGES_SHOWN = 5
+
+
+def _card_changes(changes: list[dict]) -> str:
+    """The ASO change list under one competitor card, newest first."""
+    if not changes:
+        return f"<p class='changes-none'>No listing changes in the last {ASO_HOURS // 24} days.</p>"
+    items = ""
+    for ac in changes[:CARD_CHANGES_SHOWN]:
+        label = CHANGE_LABELS.get(ac.get("change_type"), ac.get("change_type") or "Change")
+        old = _esc(str(ac.get("old_value") or "")[:80], "(empty)")
+        new = _esc(str(ac.get("new_value") or "")[:80], "(empty)")
+        items += (
+            f"<li><div class='change-head'><strong>{_esc(label)}</strong>"
+            f"<span class='muted'>{_esc(ac.get('platform'), '')} · {_when(ac.get('detected_at'))}</span></div>"
+            f"<div class='change-diff'><span class='muted'>Was:</span> {old}</div>"
+            f"<div class='change-diff'><span class='muted'>Now:</span> {new}</div></li>"
+        )
+    more = len(changes) - CARD_CHANGES_SHOWN
+    tail = f"<p class='muted small'>And {more} older change{'s' if more > 1 else ''}.</p>" if more > 0 else ""
+    return f"<ol class='changes'>{items}</ol>{tail}"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(list_key: Optional[str] = Query(None, alias="list")):
     """Main dashboard, scoped to one watch list."""
@@ -170,41 +300,43 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
     gaps_report = db.get_latest_digest("research", GAPS_PREFIX, watch_list)
 
     # Every table lists all the rows its KPI card counts, so the two always agree.
-    findings_rows = "".join(
-        f"<tr>"
-        f"<td>{_esc(f.get('competitor_name'))}</td>"
-        f"<td><span class='badge badge-{_esc(f.get('finding_type'), 'change')}'>{_esc(f.get('finding_type'))}</span></td>"
-        f"<td>{_esc((f.get('title') or '')[:120])}</td>"
-        f"<td class='num'>{_esc(f.get('importance'))}</td>"
-        f"<td class='num'>{_esc(str(f.get('created_at') or '')[:16])}</td>"
-        f"</tr>\n"
-        for f in findings
-    )
+    findings_rows = ""
+    for f in findings:
+        kind = insight_type("findings", f.get("finding_type"), f.get("title") or "")
+        what = _esc((f.get("title") or "")[:160])
+        if kind == "review":
+            complaint = _complaint_html(f.get("content"))
+            if complaint:
+                what += f"<div class='detail'>{complaint}</div>"
+        findings_rows += (
+            f"<tr>"
+            f"<td>{_type_badge(kind)}</td>"
+            f"<td>{_esc(f.get('competitor_name'))}</td>"
+            f"<td>{what}</td>"
+            f"<td class='when-col'>{_when(f.get('created_at'))}</td>"
+            f"<td class='actions'>{_insight_actions(kind, f.get('competitor_id'), watch_list, f.get('source_url'))}</td>"
+            f"</tr>\n"
+        )
+
+    changes_by_competitor: dict[int, list] = {}
+    for ac in aso_changes:  # already newest first
+        changes_by_competitor.setdefault(ac.get("competitor_id"), []).append(ac)
 
     comp_cards = ""
     for c in competitors:
         links = _store_links(db.get_competitor_store_ids(c))
         description = c.get("description") or ""
         comp_cards += (
-            f"<article class='card comp'>"
+            f"<article class='card comp' id='comp-{int(c['id'])}'>"
             f"<div class='comp-head'><h3>{html.escape(c['name'])}</h3>"
             f"<button type='button' class='btn-link' data-unwatch='{html.escape(c['name'], quote=True)}'>Unwatch</button></div>"
             + (f"<p class='muted'>{html.escape(description)}</p>" if description else "")
             + f"<p class='stores'>{links or '<span class=muted>No store IDs yet</span>'}</p>"
+            f"<section class='comp-changes' aria-label='Listing changes for {html.escape(c['name'], quote=True)}'>"
+            f"<h4>This app's listing changes ({ASO_HOURS // 24}d)</h4>"
+            f"{_card_changes(changes_by_competitor.get(c['id'], []))}</section>"
             f"</article>\n"
         )
-
-    aso_rows = "".join(
-        f"<tr>"
-        f"<td>{_esc(ac.get('competitor_name'))}</td>"
-        f"<td>{_esc(ac.get('platform'))}</td>"
-        f"<td>{_esc(ac.get('change_type'))}</td>"
-        f"<td class='clip'>{_esc(str(ac.get('old_value') or '')[:60])}</td>"
-        f"<td class='clip'>{_esc(str(ac.get('new_value') or '')[:60])}</td>"
-        f"<td class='num'>{_esc(str(ac.get('detected_at') or '')[:16])}</td>"
-        f"</tr>\n"
-        for ac in aso_changes
-    )
 
     entrant_rows = "".join(
         f"<tr>"
@@ -232,29 +364,42 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
     # Alert messages carry scraped store text, so everything is escaped
     alert_rows = ""
     for a in alerts:
-        severity = a.get("severity") if a.get("severity") in ("high", "medium", "low") else "low"
+        if a.get("source_table") == "aso_changes":
+            kind = insight_type("aso_changes", a.get("alert_type"))
+        else:
+            kind = insight_type("findings", a.get("finding_type"), a.get("title") or "")
+        what = (kind == "review" and _complaint_html(a.get("finding_content"))) or _esc(a.get("message") or a.get("title"), "")
         alert_rows += (
             f"<tr>"
-            f"<td><span class='badge badge-sev-{severity}'>{severity}</span></td>"
+            f"<td>{_type_badge(kind)}</td>"
             f"<td>{_esc(a.get('competitor_name'))}</td>"
-            f"<td>{_esc(a.get('message') or a.get('title'), '')}</td>"
-            f"<td class='num'>{_esc(str(a.get('created_at') or '')[:16])}</td>"
-            f"<td class='num'><button type='button' class='btn-link' data-dismiss='{int(a['id'])}'>Dismiss</button></td>"
+            f"<td>{what}</td>"
+            f"<td class='when-col'>{_when(a.get('created_at'))}</td>"
+            f"<td class='actions'>{_insight_actions(kind, a.get('competitor_id'), watch_list, a.get('source_url'))}"
+            f"<span><button type='button' class='btn-link' data-dismiss='{int(a['id'])}'>Dismiss</button></span></td>"
             f"</tr>\n"
         )
 
+    watch_lists = db.get_watch_lists()
+    current_label = next((w["label"] for w in watch_lists if w["key"] == watch_list), "")
     list_options = "".join(
-        f"<a class='seg' href='?list={key}' data-list='{key}'"
-        + (" aria-current='true'" if key == watch_list else "")
-        + f">{html.escape(meta['label'])}</a>"
-        for key, meta in WATCH_LISTS.items()
+        f"<li class='list-pill'>"
+        f"<a href='?list={html.escape(w['key'], quote=True)}' data-list='{html.escape(w['key'], quote=True)}'"
+        + (" aria-current='page'" if w["key"] == watch_list else "")
+        + f">{html.escape(w['label'])}</a>"
+        f"<button type='button' class='pill-edit' data-edit-list='{html.escape(w['key'], quote=True)}' "
+        f"data-label='{html.escape(w['label'], quote=True)}' "
+        f"aria-label='Rename or delete {html.escape(w['label'], quote=True)}'>Edit</button>"
+        f"</li>"
+        for w in watch_lists
     )
 
     template = _load_template("index.html")
     # Use replacement instead of .format() to avoid CSS brace conflicts
     replacements = {
         "{watch_list}": watch_list,
-        "{watch_list_label}": html.escape(WATCH_LISTS[watch_list]["label"]),
+        "{watch_list_label}": html.escape(current_label),
+        "{list_name_max}": str(WATCH_LIST_NAME_MAX),
         "{list_options}": list_options,
         "{findings_window}": f"{FINDINGS_HOURS // 24}d",
         "{aso_window}": f"{ASO_HOURS // 24}d",
@@ -266,7 +411,6 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
         "{alerts_count}": str(len(alerts)),
         "{comp_cards}": comp_cards or "<p class='empty'>No competitors in this list. Add some from <a href='#overview'>Find your market</a>.</p>",
         "{findings_rows}": findings_rows or _empty_row(5, "No findings in this window. Run a scan."),
-        "{aso_rows}": aso_rows or _empty_row(6, "No ASO changes detected."),
         "{entrant_rows}": entrant_rows or _empty_row(4, "No new entrants detected."),
         "{trends_section}": trends_section,
         "{strategic_html}": _report_html(strategic["content"]) if strategic else "",
@@ -312,7 +456,7 @@ def run_analyze(request: Request, list_key: Optional[str] = Query(None, alias="l
     from prysma.agents.analyst import AnalystAgent
 
     # No list means the old behaviour: every finding, tracked under the default list.
-    scope = list_key if list_key in WATCH_LISTS else None
+    scope = list_key if db.watch_list_exists(list_key) else None
     job_list = _watch_list(list_key)
     if not _job_start("analyze", job_list):
         return JSONResponse({"status": "running", "message": "Strategic analysis is already running."})
@@ -343,7 +487,10 @@ def analysis_status(list_key: Optional[str] = Query(None, alias="list")):
 
     def latest(prefix):
         row = db.get_latest_digest("research", prefix, watch_list)
-        return {"id": row["id"], "content": row["content"], "created_at": row["created_at"]} if row else None
+        if not row:
+            return None
+        return {"id": row["id"], "content": row["content"], "created_at": row["created_at"],
+                "html": render_report(row["content"])}
 
     return {
         "watch_list": watch_list,
@@ -484,7 +631,7 @@ def gaps(request: Request, list_key: Optional[str] = Query(None, alias="list")):
         return limited
     from prysma.agents.analyst import AnalystAgent
 
-    scope = list_key if list_key in WATCH_LISTS else None
+    scope = list_key if db.watch_list_exists(list_key) else None
     job_list = _watch_list(list_key)
     _job_start("gaps", job_list)
     report = "Gap analysis failed."
@@ -495,6 +642,80 @@ def gaps(request: Request, list_key: Optional[str] = Query(None, alias="list")):
         analyst.close()
         _job_finish("gaps", job_list, report, GAPS_PREFIX)
     return {"report": report}
+
+
+class ListNameRequest(BaseModel):
+    name: str = Field(..., max_length=200)
+
+
+def _list_error(message: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status)
+
+
+@app.get("/api/lists")
+def list_watch_lists():
+    """Every watch list, oldest first."""
+    return {"lists": db.get_watch_lists()}
+
+
+@app.post("/api/lists")
+def create_watch_list(body: ListNameRequest):
+    """Create an empty, user-named watch list."""
+    try:
+        return db.create_watch_list(body.name)
+    except ValueError as e:
+        return _list_error(str(e))
+
+
+@app.post("/api/lists/{key}/rename")
+def rename_watch_list(key: str, body: ListNameRequest):
+    """Rename a watch list. The key, and so every link to the list, stays."""
+    try:
+        if not db.rename_watch_list(key, body.name):
+            return _list_error("That list does not exist.", 404)
+    except ValueError as e:
+        return _list_error(str(e))
+    return {"key": key, "label": " ".join(body.name.split())}
+
+
+@app.post("/api/lists/{key}/delete")
+def delete_watch_list(key: str):
+    """Delete a watch list and stop watching its competitors. Their history stays."""
+    try:
+        if not db.delete_watch_list(key):
+            return _list_error("That list does not exist.", 404)
+    except ValueError as e:
+        return _list_error(str(e))
+    return {"deleted": key, "next": db.default_watch_list()}
+
+
+@app.get("/reviews/{competitor_id}", response_class=HTMLResponse)
+def reviews_page(competitor_id: int):
+    """The full text of one competitor's recent low-rated reviews."""
+    competitor = db.get_competitor(competitor_id)
+    if not competitor:
+        return HTMLResponse("Competitor not found.", status_code=404)
+    reviews = db.get_recent_reviews(competitor_id=competitor_id, rating_max=2, hours=REVIEW_HOURS)
+    items = "".join(
+        f"<article class='review'>"
+        f"<div class='review-head'><span class='stars'>{_esc(r.get('rating'))} of 5 stars</span>"
+        f"<span class='muted'>{_esc(r.get('platform'), '')} · {_when(r.get('detected_at'))}</span></div>"
+        + (f"<h2>{_esc(r.get('title'))}</h2>" if r.get("title") else "")
+        + f"<p>{_esc(r.get('content'), '')}</p>"
+        f"<p class='muted small'>{_esc(r.get('author'), 'Anonymous')}</p>"
+        f"</article>\n"
+        for r in reviews
+    ) or f"<p class='muted'>No 1 or 2 star reviews in the last {REVIEW_HOURS // 24} days.</p>"
+    replacements = {
+        "{name}": html.escape(competitor["name"]),
+        "{list}": html.escape(competitor.get("watch_list") or "", quote=True),
+        "{competitor_id}": str(int(competitor_id)),
+        "{days}": str(REVIEW_HOURS // 24),
+        "{count}": str(len(reviews)),
+        "{reviews}": items,
+    }
+    template = _load_template("reviews.html")
+    return re.sub(r"\{\w+\}", lambda m: replacements.get(m.group(0), m.group(0)), template)
 
 
 def main():

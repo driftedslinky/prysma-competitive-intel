@@ -21,8 +21,9 @@ DEFAULT_COMPETITOR_STORE_IDS = {
     "PushPress Timer": {"ios": "1554256831"},
 }
 
-# Two separate markets. Every competitor belongs to one watch list, and the
-# dashboard scopes its counts and tables to the selected list.
+# The two seeded markets. Every competitor belongs to one watch list, and the
+# dashboard scopes its counts and tables to the selected list. The live set of
+# lists is the watch_lists table; these two seed it on a new database.
 # Store ids are the bare ids: the "id" in an App Store URL is part of the URL,
 # not of the id, and a stored "id1234" is not a number.
 DEFAULT_WATCH_LIST = "interval-timers"
@@ -52,6 +53,20 @@ WATCH_LISTS = {
         },
     },
 }
+
+
+# Longest watch list name the dashboard accepts. Long names wrap badly in the switcher.
+WATCH_LIST_NAME_MAX = 40
+
+
+def clean_list_name(name) -> str:
+    """Trim a watch list name and fold inner runs of spaces. Raises ValueError when unusable."""
+    text = " ".join(str(name or "").split())
+    if not text:
+        raise ValueError("Give the list a name.")
+    if len(text) > WATCH_LIST_NAME_MAX:
+        raise ValueError(f"Use {WATCH_LIST_NAME_MAX} characters or fewer.")
+    return text
 
 
 class Database:
@@ -249,7 +264,24 @@ class Database:
                     FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source_table, source_id);
+
+                -- User-named watch lists. competitors.watch_list holds the key.
+                CREATE TABLE IF NOT EXISTS watch_lists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    label TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
+
+            # Migration: the two lists that used to be hard-coded become rows with
+            # their old keys, so no competitor moves. Only an empty table is filled,
+            # so a seeded list the user deleted stays deleted.
+            if not conn.execute("SELECT 1 FROM watch_lists LIMIT 1").fetchone():
+                conn.executemany(
+                    "INSERT INTO watch_lists (key, label) VALUES (?, ?)",
+                    [(key, meta["label"]) for key, meta in WATCH_LISTS.items()]
+                )
 
             # Migration: per-competitor app store IDs as JSON {"android": ..., "ios": ...}
             columns = [row['name'] for row in conn.execute("PRAGMA table_info(competitors)")]
@@ -359,7 +391,10 @@ class Database:
         added = 0
         with self.get_conn() as conn:
             brands = {normalise_name(r["name"]) for r in conn.execute("SELECT name FROM competitors")}
+            live = {r["key"] for r in conn.execute("SELECT key FROM watch_lists")}
             for key, watch_list in WATCH_LISTS.items():
+                if key not in live:
+                    continue
                 for name, store_ids in watch_list["seed"].items():
                     brand = normalise_name(name)
                     if brand in brands:
@@ -372,6 +407,73 @@ class Database:
                     if cursor.rowcount:
                         brands.add(brand)
         return added
+
+    # Watch lists
+    def get_watch_lists(self) -> list[dict]:
+        """Every watch list as {"key", "label"}, oldest first."""
+        with self.get_conn() as conn:
+            rows = conn.execute("SELECT key, label FROM watch_lists ORDER BY id").fetchall()
+            return self._rows_to_dicts(rows)
+
+    def watch_list_exists(self, key) -> bool:
+        if not isinstance(key, str):
+            return False
+        with self.get_conn() as conn:
+            return conn.execute("SELECT 1 FROM watch_lists WHERE key = ?", (key,)).fetchone() is not None
+
+    def default_watch_list(self) -> Optional[str]:
+        """The original default list while it exists, else the oldest list."""
+        lists = [w["key"] for w in self.get_watch_lists()]
+        if DEFAULT_WATCH_LIST in lists:
+            return DEFAULT_WATCH_LIST
+        return lists[0] if lists else None
+
+    def create_watch_list(self, name) -> dict:
+        """Create an empty list. Raises ValueError for a bad or taken name.
+
+        The key comes from the row id, so a deleted list's key is never reused
+        and its old rows can never reappear in a new list.
+        """
+        label = clean_list_name(name)
+        with self.get_conn() as conn:
+            try:
+                cursor = conn.execute(
+                    "INSERT INTO watch_lists (key, label) VALUES (?, ?)", (f"pending-{label}", label)
+                )
+            except sqlite3.IntegrityError:
+                raise ValueError("A list with that name already exists.") from None
+            key = f"list-{cursor.lastrowid}"
+            conn.execute("UPDATE watch_lists SET key = ? WHERE id = ?", (key, cursor.lastrowid))
+        return {"key": key, "label": label}
+
+    def rename_watch_list(self, key: str, name) -> bool:
+        """Rename a list. Returns False for an unknown key; raises ValueError for a bad or taken name."""
+        label = clean_list_name(name)
+        with self.get_conn() as conn:
+            try:
+                cursor = conn.execute("UPDATE watch_lists SET label = ? WHERE key = ?", (label, key))
+            except sqlite3.IntegrityError:
+                raise ValueError("A list with that name already exists.") from None
+            return cursor.rowcount > 0
+
+    def delete_watch_list(self, key: str) -> bool:
+        """Delete a list and stop watching its competitors. Their history stays.
+
+        Raises ValueError for the last list: the dashboard always needs one.
+        """
+        with self.get_conn() as conn:
+            if not conn.execute("SELECT 1 FROM watch_lists WHERE key = ?", (key,)).fetchone():
+                return False
+            if conn.execute("SELECT COUNT(*) FROM watch_lists").fetchone()[0] <= 1:
+                raise ValueError("Keep at least one list.")
+            conn.execute("UPDATE competitors SET is_active = 0 WHERE watch_list = ?", (key,))
+            conn.execute("DELETE FROM watch_lists WHERE key = ?", (key,))
+            return True
+
+    def get_competitor(self, competitor_id: int) -> Optional[dict]:
+        with self.get_conn() as conn:
+            row = conn.execute("SELECT * FROM competitors WHERE id = ?", (competitor_id,)).fetchone()
+            return dict(row) if row else None
 
     def get_competitor_by_name(self, name: str) -> Optional[int]:
         with self.get_conn() as conn:
@@ -812,8 +914,10 @@ class Database:
         """Recent alerts that are not dismissed, newest first."""
         cutoff = f"-{hours} hours"  # SQLite modifier; columns are UTC CURRENT_TIMESTAMP
         query, params = self._scope(
-            """SELECT a.*, c.name as competitor_name FROM alerts a
+            """SELECT a.*, c.name as competitor_name, f.finding_type, f.content as finding_content,
+                      f.source_url FROM alerts a
                LEFT JOIN competitors c ON a.competitor_id = c.id
+               LEFT JOIN findings f ON a.source_table = 'findings' AND f.id = a.source_id
                WHERE a.created_at > datetime('now', ?) AND COALESCE(a.is_dismissed, 0) = 0""",
             [cutoff], watch_list
         )
