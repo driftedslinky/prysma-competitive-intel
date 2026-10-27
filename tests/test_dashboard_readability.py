@@ -230,10 +230,17 @@ class TestReportRenderer:
         assert "&lt;img src=x onerror=alert(1)&gt;" in out
         assert "{alert_rows}" in out
 
+    def test_renders_italic_metadata_and_ignores_underscores_in_words(self):
+        out = render_report("_2026-10-08 · 8 competitors · 336h_\n"
+                            "a snake_case identifier and file_name_here stay plain")
+        assert "<em>2026-10-08 · 8 competitors · 336h</em>" in out
+        assert "snake_case" in out and "file_name_here" in out
+        assert "<em>case" not in out
+
     def test_only_known_tags_are_emitted(self):
         import re
         tags = set(re.findall(r"</?([a-z0-9]+)", render_report(HOSTILE + "\n`code` ---\n---")))
-        assert tags <= {"p", "br", "strong", "code", "h2", "h3", "h4", "ul", "ol", "li", "hr"}
+        assert tags <= {"p", "br", "strong", "em", "code", "h2", "h3", "h4", "ul", "ol", "li", "hr"}
 
     def test_hostile_report_is_inert_on_the_dashboard_and_api(self, client, test_db):
         test_db.add_digest("research", "🧠 *Strategic Analysis*\n" + HOSTILE, watch_list=DEFAULT_WATCH_LIST)
