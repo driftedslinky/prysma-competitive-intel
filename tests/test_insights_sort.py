@@ -39,7 +39,7 @@ def _findings_table(page: str) -> str:
 
 def _body_rows(table: str) -> list[str]:
     body = table[table.index("<tbody>"):]
-    return re.findall(r"<tr>.*?</tr>", body, re.S)
+    return re.findall(r"<tr[ >].*?</tr>", body, re.S)
 
 
 @pytest.fixture

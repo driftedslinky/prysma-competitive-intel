@@ -9,7 +9,7 @@ import html
 import re
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -303,6 +303,31 @@ def _type_badge(kind: str) -> str:
     return f"<span class='badge type-{kind}'>{INSIGHT_LABELS[kind]}</span>"
 
 
+def _type_filter(table_id: str, noun: str, kinds: list[str]) -> str:
+    """Filter buttons for an Insights table: "All" plus one per type in its rows.
+
+    kinds holds the type of every rendered row, the same value that sets the
+    row's data-type and badge, so a button's count always equals the rows it
+    shows. A table with no rows gets no bar.
+    """
+    if not kinds:
+        return ""
+    counts = Counter(kinds)
+    buttons = [("all", "All", len(kinds))]
+    buttons += [(k, INSIGHT_LABELS[k], counts[k]) for k in INSIGHT_LABELS if counts[k]]
+    html_buttons = ""
+    for key, label, n in buttons:
+        rows = f"{n} {noun}" + ("" if n == 1 else "s")
+        action = f"Show all {rows}" if key == "all" else f"Show only the {rows} of type {label}"
+        html_buttons += (
+            f"<button type='button' class='filter-chip' data-filter='{key}' "
+            f"aria-pressed='{'true' if key == 'all' else 'false'}' aria-label='{action}'>"
+            f"{label} <span class='filter-count'>({n})</span></button>"
+        )
+    return (f"<div class='type-filter' role='group' aria-label='Filter {noun}s by type' "
+            f"data-filter-for='{table_id}'>{html_buttons}</div>")
+
+
 # ASO change labels for the competitor cards
 CHANGE_LABELS = {
     "title": "Title", "subtitle": "Subtitle", "description": "Description", "price": "Price",
@@ -373,6 +398,7 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
 
     # Every table lists all the rows its KPI card counts, so the two always agree.
     findings_rows = ""
+    findings_kinds = []
     for f in findings:
         kind = insight_type("findings", f.get("finding_type"), f.get("title") or "")
         what = _esc((f.get("title") or "")[:160])
@@ -380,8 +406,9 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
             complaint = _complaint_html(f.get("content"))
             if complaint:
                 what += f"<div class='detail'>{complaint}</div>"
+        findings_kinds.append(kind)
         findings_rows += (
-            f"<tr>"
+            f"<tr data-type='{kind}'>"
             f"<td>{_type_badge(kind)}</td>"
             f"<td>{_esc(f.get('competitor_name'))}</td>"
             f"<td>{what}</td>"
@@ -440,14 +467,16 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
 
     # Alert messages carry scraped store text, so everything is escaped
     alert_rows = ""
+    alert_kinds = []
     for a in alerts:
         if a.get("source_table") == "aso_changes":
             kind = insight_type("aso_changes", a.get("alert_type"))
         else:
             kind = insight_type("findings", a.get("finding_type"), a.get("title") or "")
         what = (kind == "review" and _complaint_html(a.get("finding_content"))) or _esc(a.get("message") or a.get("title"), "")
+        alert_kinds.append(kind)
         alert_rows += (
-            f"<tr>"
+            f"<tr data-type='{kind}'>"
             f"<td>{_type_badge(kind)}</td>"
             f"<td>{_esc(a.get('competitor_name'))}</td>"
             f"<td>{what}</td>"
@@ -487,12 +516,14 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
         "{aso_count}": str(len(aso_changes)),
         "{alerts_count}": str(len(alerts)),
         "{comp_cards}": comp_cards or "<p class='empty'>No competitors in this list. Add some from <a href='#overview'>Find your market</a>.</p>",
+        "{findings_filter}": _type_filter("findings-table", "finding", findings_kinds),
         "{findings_rows}": findings_rows or _empty_row(5, "No findings in this window. Run a scan."),
         "{entrant_rows}": entrant_rows or _empty_row(4, "No new entrants detected."),
         "{trends_section}": trends_section,
         "{strategic_html}": _report_html(strategic["content"]) if strategic else "",
         "{gaps_html}": _report_html(gaps_report["content"]) if gaps_report else "",
         "{last_updated}": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "{alert_filter}": _type_filter("alerts-table", "alert", alert_kinds),
         "{alert_rows}": alert_rows or _empty_row(5, "No material changes detected. That's the quiet, normal state."),
     }
     # One pass over the template only, so placeholder-like text inside scraped

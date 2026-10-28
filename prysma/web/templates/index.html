@@ -197,6 +197,15 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         .sort-btn:hover, th[aria-sort="ascending"] .sort-btn, th[aria-sort="descending"] .sort-btn { color: var(--text); }
         .sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
         .sort-arrow { color: var(--accent); font-size: 12px; min-width: 1em; }
+        /* Type filter above an Insights table. Selected: accent border, tint and a check mark. */
+        .type-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .filter-chip { border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--muted);
+                       padding: 6px 14px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+        .filter-chip:hover { color: var(--text); border-color: var(--border-strong); }
+        .filter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .filter-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+        .filter-chip[aria-pressed="true"]::before { content: "✓ "; color: var(--accent); }
+        .filter-count { font-variant-numeric: tabular-nums; }
 
         /* Badges: tinted, not solid */
         .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 14px; font-weight: 600; white-space: nowrap;
@@ -421,7 +430,8 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <h2 id="h-alerts">Alerts ({alerts_window}) <span class="muted">({alerts_count})</span></h2>
                     <button type="button" class="btn btn-secondary" data-action="rebuild-alerts">Rebuild alerts</button>
                 </div>
-                <div class="table-wrap"><table>
+                {alert_filter}
+                <div class="table-wrap"><table id="alerts-table">
                     <thead><tr><th>Type</th><th>Competitor</th><th>What changed</th><th>When (your time)</th><th>Go to</th></tr></thead>
                     <tbody>{alert_rows}</tbody>
                 </table></div>
@@ -432,6 +442,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                     <h2 id="h-findings">Findings ({findings_window}) <span class="muted">({findings_count})</span></h2>
                     <span class="sub" id="findings-order">Most important first</span>
                 </div>
+                {findings_filter}
                 <div class="table-wrap"><table id="findings-table">
                     <thead><tr>
                         <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="type">Type<span class="sort-arrow" aria-hidden="true"></span></button></th>
@@ -906,6 +917,34 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
             });
         });
     })();
+
+    // Insights type filter: show only the rows of one type. The rows and the
+    // counts come from the server; this only sets the hidden attribute.
+    document.querySelectorAll('.type-filter').forEach(bar => {
+        const table = document.getElementById(bar.dataset.filterFor);
+        if (!table) return;
+        const body = table.tBodies[0];
+        const buttons = Array.from(bar.querySelectorAll('.filter-chip'));
+        bar.addEventListener('click', e => {
+            const button = e.target.closest('.filter-chip');
+            if (!button) return;
+            const type = button.dataset.filter;
+            let shown = 0;
+            for (const row of body.querySelectorAll('tr[data-type]')) {
+                row.hidden = type !== 'all' && row.dataset.type !== type;
+                if (!row.hidden) shown++;
+            }
+            for (const b of buttons) b.setAttribute('aria-pressed', b === button ? 'true' : 'false');
+            // Keep an empty table readable if no row is left to show.
+            let none = body.querySelector('.filter-none');
+            if (!shown && !none) {
+                none = body.insertRow();
+                none.className = 'filter-none';
+                none.innerHTML = '<td colspan="5" class="empty">No rows of this type.</td>';
+            }
+            if (none) none.hidden = shown > 0;
+        });
+    });
     </script>
 </body>
 </html>
