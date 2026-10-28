@@ -209,6 +209,18 @@ def _when(value) -> str:
     return f"<time class='when' datetime='{day}T{clock}{seconds}Z'>{stamp}, {clock} UTC</time>"
 
 
+def _when_sort(value) -> str:
+    """A data-sort attribute with the ISO-8601 time, so the table sorts by time.
+
+    Empty when the value is not a timestamp; the page script then sorts on the
+    cell text.
+    """
+    match = _TIMESTAMP.match(str(value or ""))
+    if not match:
+        return ""
+    return f" data-sort='{match.group(1)}T{match.group(2)}{match.group(3) or ':00'}Z'"
+
+
 # Insight types. The dashboard shows one of these four for every alert and
 # finding, mapped from data the detectors already write. There is no severity.
 INSIGHT_LABELS = {
@@ -373,7 +385,7 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
             f"<td>{_type_badge(kind)}</td>"
             f"<td>{_esc(f.get('competitor_name'))}</td>"
             f"<td>{what}</td>"
-            f"<td class='when-col'>{_when(f.get('created_at'))}</td>"
+            f"<td class='when-col'{_when_sort(f.get('created_at'))}>{_when(f.get('created_at'))}</td>"
             f"<td class='actions'>{_insight_actions(kind, f.get('competitor_id'), watch_list, f.get('source_url'))}</td>"
             f"</tr>\n"
         )

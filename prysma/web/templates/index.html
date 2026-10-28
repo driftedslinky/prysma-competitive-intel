@@ -191,6 +191,12 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         td.clip { max-width: 220px; overflow-wrap: anywhere; color: var(--muted); }
         .empty { color: var(--muted); padding: 20px; }
+        /* Sortable headers: a real button inside the th, styled as the header text. */
+        .sort-btn { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
+                    display: inline-flex; align-items: center; gap: 6px; text-align: left; }
+        .sort-btn:hover, th[aria-sort="ascending"] .sort-btn, th[aria-sort="descending"] .sort-btn { color: var(--text); }
+        .sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+        .sort-arrow { color: var(--accent); font-size: 12px; min-width: 1em; }
 
         /* Badges: tinted, not solid */
         .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 14px; font-weight: 600; white-space: nowrap;
@@ -424,10 +430,16 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
             <section aria-labelledby="h-findings">
                 <div class="block-head">
                     <h2 id="h-findings">Findings ({findings_window}) <span class="muted">({findings_count})</span></h2>
-                    <span class="sub">Most important first</span>
+                    <span class="sub" id="findings-order">Most important first</span>
                 </div>
-                <div class="table-wrap"><table>
-                    <thead><tr><th>Type</th><th>Competitor</th><th>What happened</th><th>When (your time)</th><th>Go to</th></tr></thead>
+                <div class="table-wrap"><table id="findings-table">
+                    <thead><tr>
+                        <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="type">Type<span class="sort-arrow" aria-hidden="true"></span></button></th>
+                        <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="competitor">Competitor<span class="sort-arrow" aria-hidden="true"></span></button></th>
+                        <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="what happened">What happened<span class="sort-arrow" aria-hidden="true"></span></button></th>
+                        <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="time" data-sort-time>When (your time)<span class="sort-arrow" aria-hidden="true"></span></button></th>
+                        <th aria-sort="none"><button type="button" class="sort-btn" data-sort-name="destination">Go to<span class="sort-arrow" aria-hidden="true"></span></button></th>
+                    </tr></thead>
                     <tbody>{findings_rows}</tbody>
                 </table></div>
             </section>
@@ -855,6 +867,45 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
         }
     }
     refreshAnalysis();
+
+    // Findings table: click a header to sort the rows already on the page.
+    // The server order (most important first) stays until the reader sorts.
+    (function () {
+        const table = document.getElementById('findings-table');
+        if (!table) return;
+        const order = document.getElementById('findings-order');
+        const headers = Array.from(table.tHead.rows[0].cells);
+        const sortKey = cell => {
+            if (!cell) return '';
+            return cell.hasAttribute('data-sort') ? cell.getAttribute('data-sort') : cell.textContent.trim();
+        };
+        headers.forEach((th, col) => {
+            const button = th.querySelector('.sort-btn');
+            button.addEventListener('click', () => {
+                const asc = th.getAttribute('aria-sort') !== 'ascending';
+                const body = table.tBodies[0];
+                const rows = Array.from(body.rows);
+                // Array sort is stable, so equal keys keep the importance order.
+                rows.sort((a, b) => {
+                    const r = sortKey(a.cells[col]).localeCompare(sortKey(b.cells[col]), undefined,
+                                                                  {numeric: true, sensitivity: 'base'});
+                    return asc ? r : -r;
+                });
+                rows.forEach(row => body.appendChild(row));
+                for (const h of headers) {
+                    h.setAttribute('aria-sort', 'none');
+                    h.querySelector('.sort-arrow').textContent = '';
+                }
+                th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+                th.querySelector('.sort-arrow').textContent = asc ? '▲' : '▼';
+                const name = button.dataset.sortName;
+                const way = button.hasAttribute('data-sort-time')
+                    ? (asc ? 'oldest first' : 'newest first')
+                    : (asc ? 'A to Z' : 'Z to A');
+                order.textContent = 'Sorted by ' + name + ', ' + way;
+            });
+        });
+    })();
     </script>
 </body>
 </html>
