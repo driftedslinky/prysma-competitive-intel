@@ -1,0 +1,98 @@
+"""The Google Play in-app purchase range: parsing, storage, migration, and the card."""
+import sqlite3
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from prysma.agents.competitive_intel import parse_play_iap_range
+from prysma.storage.database import Database
+from prysma.web import app as web_app
+
+
+class TestParsePlayIapRange:
+    def test_returns_the_range_from_a_listing_snippet(self):
+        text = ('<div class="ulKokd"><div>In-app purchases</div>'
+                '<div class="reAt0">£0.59 - £114.99 if billed through Play</div></div>')
+        assert parse_play_iap_range(text) == "£0.59 - £114.99 if billed through Play"
+
+    def test_returns_none_without_a_range(self):
+        assert parse_play_iap_range("<html>Free · Contains ads</html>") is None
+
+    def test_picks_the_first_range(self):
+        # The target app's data block sorts before the "similar apps" carousel.
+        text = ("£2.99 - £79.99 if billed through Play ... "
+                "£0.49 - £204.99 if billed through Play")
+        assert parse_play_iap_range(text) == "£2.99 - £79.99 if billed through Play"
+
+    def test_other_currencies(self):
+        assert parse_play_iap_range("$1.99 - $49.99 if billed through Play") == \
+            "$1.99 - $49.99 if billed through Play"
+        assert parse_play_iap_range("€1,99 - €9,99 if billed through Play") == \
+            "€1,99 - €9,99 if billed through Play"
+
+
+class TestIapRangeStorage:
+    def test_upsert_stores_and_updates_the_range(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        database.add_competitor("Opal")
+        cid = database.get_competitor_by_name("Opal")
+        database.upsert_app_listing(cid, "android", "a.b", "Opal", price="Free",
+                                    iap_range="£2.99 - £79.99 if billed through Play")
+        database.upsert_app_listing(cid, "android", "a.b", "Opal", price="Free",
+                                    iap_range="£2.99 - £89.99 if billed through Play")
+        [listing] = database.get_app_listings(cid)
+        assert listing["current_iap_range"] == "£2.99 - £89.99 if billed through Play"
+
+    def test_migration_adds_the_column_and_keeps_rows(self, tmp_path):
+        path = str(tmp_path / "old.db")
+        conn = sqlite3.connect(path)
+        conn.executescript("""
+            CREATE TABLE competitors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+                website TEXT, description TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1);
+            CREATE TABLE app_store_listings (id INTEGER PRIMARY KEY AUTOINCREMENT, competitor_id INTEGER,
+                platform TEXT CHECK(platform IN ('ios', 'android')), store_id TEXT, app_name TEXT,
+                developer TEXT, current_title TEXT, current_subtitle TEXT, current_description TEXT,
+                current_price TEXT, current_rating REAL, current_ratings_count INTEGER,
+                last_updated DATE, last_checked TIMESTAMP);
+            INSERT INTO competitors (name) VALUES ('Old');
+            INSERT INTO app_store_listings (competitor_id, platform, store_id, app_name, current_price, current_rating)
+                VALUES (1, 'android', 'old.app', 'Old', 'Free', 4.6);
+        """)
+        conn.commit()
+        conn.close()
+
+        database = Database(path)
+        [listing] = database.get_app_listings(1)
+        assert listing["app_name"] == "Old" and listing["current_price"] == "Free"
+        assert listing["current_rating"] == 4.6
+        assert "current_iap_range" in listing and listing["current_iap_range"] is None
+        Database(path)  # second init is a no-op, not an error
+        assert len(Database(path).get_app_listings()) == 1
+
+
+class TestCompetitorCardPrice:
+    @pytest.fixture
+    def test_db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        database.add_competitor("Timer A")
+        return database
+
+    @pytest.fixture
+    def client(self, test_db):
+        web_app._rate_hits.clear()
+        with patch("prysma.web.app.db", test_db):
+            yield TestClient(web_app.app)
+
+    def test_card_shows_rating_price_and_iap_range(self, client, test_db):
+        cid = test_db.get_competitor_by_name("Timer A")
+        test_db.upsert_app_listing(cid, "android", "a.b", "A", price="Free", rating=4.6,
+                                   iap_range="£0.59 - £114.99 if billed through Play")
+        test_db.upsert_app_listing(cid, "ios", "123", "A", price="Free", rating=4.62)
+        page = client.get("/").text
+        card = page[page.index(f"id='comp-{cid}'"):]
+        card = card[:card.index("</article>")]
+        assert "<strong>Android</strong> 4.6★ Free · In-app purchases £0.59–£114.99" in card
+        assert "<strong>iOS</strong> 4.6★ Free</p>" in card
+        assert "This app's listing changes" in card  # the existing section stays

@@ -179,6 +179,7 @@ class Database:
                     current_subtitle TEXT,
                     current_description TEXT,
                     current_price TEXT,
+                    current_iap_range TEXT,
                     current_rating REAL,
                     current_ratings_count INTEGER,
                     last_updated DATE,
@@ -306,6 +307,11 @@ class Database:
             columns = [row['name'] for row in conn.execute("PRAGMA table_info(digests)")]
             if 'watch_list' not in columns:
                 conn.execute("ALTER TABLE digests ADD COLUMN watch_list TEXT")
+
+            # Migration: Google Play in-app purchase range. NULL until the next scrape.
+            columns = [row['name'] for row in conn.execute("PRAGMA table_info(app_store_listings)")]
+            if 'current_iap_range' not in columns:
+                conn.execute("ALTER TABLE app_store_listings ADD COLUMN current_iap_range TEXT")
 
             # Migration: review content hash for dedupe; backfill existing rows
             columns = [row['name'] for row in conn.execute("PRAGMA table_info(competitor_reviews)")]
@@ -678,7 +684,7 @@ class Database:
     def upsert_app_listing(self, competitor_id: int, platform: str, store_id: str,
                            app_name: str, developer: str = None, title: str = None,
                            subtitle: str = None, description: str = None,
-                           price: str = None, rating: float = None,
+                           price: str = None, iap_range: str = None, rating: float = None,
                            ratings_count: int = None, last_updated: str = None) -> dict:
         """Insert or update an app store listing. Returns dict with 'id' and 'changed' flag."""
         with self.get_conn() as conn:
@@ -709,12 +715,12 @@ class Database:
                     """UPDATE app_store_listings SET
                         app_name = ?, developer = ?, current_title = ?,
                         current_subtitle = ?, current_description = ?,
-                        current_price = ?, current_rating = ?,
+                        current_price = ?, current_iap_range = ?, current_rating = ?,
                         current_ratings_count = ?, last_updated = ?,
                         last_checked = CURRENT_TIMESTAMP
                        WHERE competitor_id = ? AND platform = ?""",
                     (app_name, developer, title, subtitle, description,
-                     price, rating, ratings_count, last_updated,
+                     price, iap_range, rating, ratings_count, last_updated,
                      competitor_id, platform)
                 )
                 
@@ -732,10 +738,10 @@ class Database:
                     """INSERT INTO app_store_listings
                         (competitor_id, platform, store_id, app_name, developer,
                          current_title, current_subtitle, current_description,
-                         current_price, current_rating, current_ratings_count, last_updated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         current_price, current_iap_range, current_rating, current_ratings_count, last_updated)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (competitor_id, platform, store_id, app_name, developer,
-                     title, subtitle, description, price, rating, ratings_count, last_updated)
+                     title, subtitle, description, price, iap_range, rating, ratings_count, last_updated)
                 )
                 return {'id': cursor.lastrowid, 'changed': True, 'changes': {'new_listing': (None, app_name)}}
 

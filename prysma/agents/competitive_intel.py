@@ -35,6 +35,20 @@ def parse_play_price(text: str) -> str:
     return "Free"
 
 
+_PLAY_IAP_RANGE = re.compile(r'([£$€]\s?[\d.,]+\s*-\s*[£$€]\s?[\d.,]+\s*if billed through Play)')
+
+
+def parse_play_iap_range(text: str) -> Optional[str]:
+    """Return the in-app purchase range of a Google Play listing page, or None.
+
+    The target app's data block comes before the "similar apps" carousel, so
+    the first match is the target's. A free app with no in-app purchases has
+    no such string; that is not an error.
+    """
+    match = _PLAY_IAP_RANGE.search(text)
+    return match.group(1) if match else None
+
+
 class CompetitiveIntelAgent:
     """Tracks competitor app store listings, ASO changes, reviews, and pricing."""
 
@@ -187,6 +201,7 @@ class CompetitiveIntelAgent:
             "description": description,
             "last_updated": updated,
             "price": price,
+            "iap_range": parse_play_iap_range(text),
         }
 
     _LD_JSON_RE = re.compile(
@@ -276,6 +291,7 @@ class CompetitiveIntelAgent:
             subtitle=listing.get("subtitle"),
             description=listing.get("description"),
             price=listing.get("price"),
+            iap_range=listing.get("iap_range"),
             rating=listing.get("rating"),
             ratings_count=listing.get("ratings_count"),
             last_updated=listing.get("last_updated"),

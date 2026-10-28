@@ -168,6 +168,26 @@ def _store_links(store_ids: dict) -> str:
     return " · ".join(links)
 
 
+def _price_lines(listings: list[dict]) -> str:
+    """One line per platform: star rating, base price, and in-app purchase range."""
+    by_platform = {listing.get("platform"): listing for listing in listings}
+    lines = []
+    for platform, label in (("android", "Android"), ("ios", "iOS")):
+        listing = by_platform.get(platform)
+        if not listing:
+            continue
+        rating = listing.get("current_rating")
+        parts = [f"{float(rating):.1f}★" if rating is not None else "no rating",
+                 html.escape(listing.get("current_price") or "price unknown")]
+        line = f"<strong>{label}</strong> " + " ".join(parts)
+        iap = re.sub(r"\s*if billed through Play$", "", listing.get("current_iap_range") or "")
+        if iap:
+            iap = re.sub(r"\s*-\s*", "–", iap)
+            line += f" · In-app purchases {html.escape(iap)}"
+        lines.append(line)
+    return f"<p class='prices'>{'<br>'.join(lines)}</p>" if lines else ""
+
+
 def _empty_row(colspan: int, text: str) -> str:
     return f"<tr><td colspan='{colspan}' class='empty'>{text}</td></tr>"
 
@@ -362,6 +382,10 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
     for ac in aso_changes:  # already newest first
         changes_by_competitor.setdefault(ac.get("competitor_id"), []).append(ac)
 
+    listings_by_competitor: dict[int, list] = {}
+    for listing in db.get_app_listings():
+        listings_by_competitor.setdefault(listing.get("competitor_id"), []).append(listing)
+
     comp_cards = ""
     for c in competitors:
         links = _store_links(db.get_competitor_store_ids(c))
@@ -372,7 +396,8 @@ async def index(list_key: Optional[str] = Query(None, alias="list")):
             f"<button type='button' class='btn-link' data-unwatch='{html.escape(c['name'], quote=True)}'>Unwatch</button></div>"
             + (f"<p class='muted'>{html.escape(description)}</p>" if description else "")
             + f"<p class='stores'>{links or '<span class=muted>No store IDs yet</span>'}</p>"
-            f"<section class='comp-changes' aria-label='Listing changes for {html.escape(c['name'], quote=True)}'>"
+            + _price_lines(listings_by_competitor.get(c["id"], []))
+            + f"<section class='comp-changes' aria-label='Listing changes for {html.escape(c['name'], quote=True)}'>"
             f"<h4>This app's listing changes ({ASO_HOURS // 24}d)</h4>"
             f"{_card_changes(changes_by_competitor.get(c['id'], []))}</section>"
             f"</article>\n"

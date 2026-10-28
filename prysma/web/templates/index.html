@@ -326,7 +326,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                 </div>
                 <label class="label-text" for="discover-query">Your app, a store link, or an app idea</label>
                 <div class="field">
-                    <input type="text" id="discover-query" placeholder="e.g. a HIIT timer with voice cues" onkeydown="if(event.key==='Enter')discoverCompetitors()">
+                    <input type="text" id="discover-query" placeholder="e.g. a store link, an app name, or just an idea" onkeydown="if(event.key==='Enter')discoverCompetitors()">
                     <button class="btn" id="discover-btn" onclick="discoverCompetitors()">Find competitors</button>
                 </div>
                 <div id="discover-status" class="muted" role="status"></div>
@@ -379,7 +379,7 @@ Stripe, Kraken, Square, Xero and Shopify Finance.
                 </div>
                 <label class="label-text" for="tavily-query">Search query</label>
                 <div class="field">
-                    <input type="text" id="tavily-query" placeholder="e.g. Opal screen time funding" onkeydown="if(event.key==='Enter')tavilySearch()">
+                    <input type="text" id="tavily-query" placeholder="e.g. a competitor's name plus a topic" onkeydown="if(event.key==='Enter')tavilySearch()">
                     <button class="btn" onclick="tavilySearch()">Search</button>
                 </div>
                 <div id="search-results"></div>
