@@ -35,15 +35,34 @@ def parse_play_price(text: str) -> str:
     return "Free"
 
 
-_PLAY_IAP_RANGE = re.compile(r'([£$€]\s?[\d.,]+\s*-\s*[£$€]\s?[\d.,]+\s*if billed through Play)')
+# The target app's own in-app purchase range, and only its own.
+#
+# Google emits two shapes on the page:
+#   target       ...["1,000,000+",...],null,null,null,null,[2],["GBP0.29 - GBP9.49 if billed through Play",[0]]
+#   recommended  ...["Install"],null,["CAE="]]]],[2],null,[1,1,0],["GBP0.59 - GBP114.99 if billed through Play",[0]]
+#
+# Both end the same way, so matching the range alone picks up whichever app
+# happens to be listed first — and Google varies the "similar apps" set between
+# requests, so that answer changes between fetches. Verified on 2026-10-28: the
+# unanchored pattern returned two different ranges for the same app on
+# consecutive fetches, and for one app returned a recommended app's range
+# entirely.
+#
+# Anchoring on the literal "],[2],[" that precedes only the target's row makes
+# the result stable across fetches. When the shape changes the pattern simply
+# stops matching and the card shows no range, which is the safe failure: no
+# price beats a wrong price.
+_PLAY_IAP_RANGE = re.compile(
+    r'\[2\],\["([£$€]\s?[\d.,]+\s*-\s*[£$€]\s?[\d.,]+\s*if billed through Play)'
+)
 
 
 def parse_play_iap_range(text: str) -> Optional[str]:
-    """Return the in-app purchase range of a Google Play listing page, or None.
+    """Return the target app's own in-app purchase range, or None.
 
-    The target app's data block comes before the "similar apps" carousel, so
-    the first match is the target's. A free app with no in-app purchases has
-    no such string; that is not an error.
+    This is the range Google shows for the app being viewed, not for an app in
+    the "similar apps" carousel, which carries a different prefix. A listing
+    with no in-app purchases has no such field; that is not an error.
     """
     match = _PLAY_IAP_RANGE.search(text)
     return match.group(1) if match else None

@@ -11,24 +11,50 @@ from prysma.web import app as web_app
 
 
 class TestParsePlayIapRange:
-    def test_returns_the_range_from_a_listing_snippet(self):
-        text = ('<div class="ulKokd"><div>In-app purchases</div>'
-                '<div class="reAt0">£0.59 - £114.99 if billed through Play</div></div>')
-        assert parse_play_iap_range(text) == "£0.59 - £114.99 if billed through Play"
+    """The page carries the target app's own range and the ranges of the apps in
+    the "similar apps" carousel, and they are distinguishable only by the
+    characters that precede them."""
+
+    # The target app's own row: the range follows "],[2],[" directly.
+    TARGET = ('<div>In-app purchases</div>["1,000,000+",1000000,1591094,"1M+"]'
+              'null,null,null,null,[2],["£0.29 - £9.49 if billed through Play",[0]]')
+
+    # A recommended app's row: "[2],null,[1,1,0],[" comes before the range.
+    RECOMMENDED = ('["Install"],null,["CgYKBENBRT0="]]]],[2],null,[1,1,0],'
+                   '["£0.59 - £114.99 if billed through Play",[0]]')
+
+    def test_returns_the_target_apps_own_range(self):
+        assert parse_play_iap_range(self.TARGET) == "£0.29 - £9.49 if billed through Play"
+
+    def test_ignores_a_recommended_apps_range(self):
+        assert parse_play_iap_range(self.RECOMMENDED) is None
+
+    def test_prefers_the_target_over_the_carousel(self):
+        # Both shapes on one page: the target's must win.
+        assert parse_play_iap_range(self.RECOMMENDED + self.TARGET) == \
+            "£0.29 - £9.49 if billed through Play"
+
+    def test_the_carousel_order_does_not_change_the_answer(self):
+        """The regression: Google varies the carousel between requests.
+
+        An earlier version matched the first range anywhere on the page, so two
+        consecutive fetches of the same app returned different prices, and for
+        one app it returned a recommended app's range entirely.
+        """
+        carousel_a = self.RECOMMENDED
+        carousel_b = ('["Install"],null,["TOKEN"]]]],[2],null,[1,1,0],'
+                      '["£11.49 - £189.99 if billed through Play",[0]]')
+        assert parse_play_iap_range(carousel_a + self.TARGET) == \
+            parse_play_iap_range(carousel_b + self.TARGET) == \
+            "£0.29 - £9.49 if billed through Play"
 
     def test_returns_none_without_a_range(self):
         assert parse_play_iap_range("<html>Free · Contains ads</html>") is None
 
-    def test_picks_the_first_range(self):
-        # The target app's data block sorts before the "similar apps" carousel.
-        text = ("£2.99 - £79.99 if billed through Play ... "
-                "£0.49 - £204.99 if billed through Play")
-        assert parse_play_iap_range(text) == "£2.99 - £79.99 if billed through Play"
-
     def test_other_currencies(self):
-        assert parse_play_iap_range("$1.99 - $49.99 if billed through Play") == \
+        assert parse_play_iap_range('[2],["$1.99 - $49.99 if billed through Play",[0]]') == \
             "$1.99 - $49.99 if billed through Play"
-        assert parse_play_iap_range("€1,99 - €9,99 if billed through Play") == \
+        assert parse_play_iap_range('[2],["€1,99 - €9,99 if billed through Play",[0]]') == \
             "€1,99 - €9,99 if billed through Play"
 
 
